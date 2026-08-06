@@ -1,0 +1,10 @@
+﻿Olá,
+
+Caso tenha dúvida de como realizar a importação dos dados contidos nesta pasta, possuímos uma dica em nossa Central de Soluções com todo o passo a passo detalhado com imagens de como proceder.
+
+Link para acessar o Conteúdo: https://suporte.dominioatendimento.com:82/central/faces/solucao.html?codigo=4707
+
+Obs.: Em casos de erro, cadastre uma Solicitação disponibilizando os seguintes Itens:
+
+A - Relatório de erros da importação;
+B - Arquivo já convertido para TXT.

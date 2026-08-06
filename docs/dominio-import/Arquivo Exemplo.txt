@@ -1,0 +1,13 @@
+01/04/2017;5;6;100,00;Referente ao Pagamento da NF XXXX;1;
+02/04/2017;10;458;1000,00;Referente ao Honorários ;1;
+01/04/2017;35;12123;21,43;Referente ao Pagamento da NF XXXX;1
+01/05/2017;6;5;100,00;Referente ao Pagamento da NF XXXX;1
+01/05/2017;45;8;25,00;Referente ao Pagamento da NF XXXX;1
+01/05/2017;3543;15;25,00;Referente ao Pagamento da NF XXXX;1
+01/05/2017;3887;;25,00;Pagamento Parcela 1;1
+01/05/2017;31;;25,00;Pagamento Parcela 2;
+10/05/2017;;44545;100,00;Recebimento da Parcelas;
+10/05/2017;12;;25,00;Pagamento Parcela 3;
+10/05/2017;10;;25,00;Pagamento Parcela 4;
+10/05/2017;56;20;50,00;Referente ao Pagamento da NF XXXX;1
+10/05/2017;1010;31;50,00;Referente ao Pagamento da NF XXXX;1

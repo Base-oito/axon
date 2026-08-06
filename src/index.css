@@ -1,0 +1,76 @@
+@tailwind components;
+@tailwind utilities;
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { font-size: 17px; -webkit-text-size-adjust: 100%; }
+body { min-height: 100vh; }
+button, input, select, textarea { background: transparent; border: none; color: inherit; font: inherit; font-size: inherit; }
+a { color: inherit; text-decoration: none; }
+ul, ol { list-style: none; }
+
+/* ===== DARK THEME (default) ===== */
+:root {
+  --color-core-black: #090909;
+  --color-rich-carbon: #111111;
+  --color-urban-smoke: #1B1B1B;
+  --color-pulse-ash: #A8A8A8;
+  --color-off-white: #E7E7E7;
+  --color-neural-fog: #DADADA;
+  --color-white-flash: #F5F5F5;
+  --color-electric-teal: #F97316;
+  --color-infrared: #FF8C42;
+  --color-success: #F59E0B;
+}
+
+/* ===== LIGHT THEME ===== */
+html.light {
+  --color-core-black: #F8F9FA;
+  --color-rich-carbon: #FFFFFF;
+  --color-urban-smoke: #E9ECEF;
+  --color-pulse-ash: #6C757D;
+  --color-off-white: #212529;
+  --color-neural-fog: #495057;
+  --color-white-flash: #343A40;
+  --color-electric-teal: #F97316;
+  --color-infrared: #FF8C42;
+  --color-success: #F59E0B;
+}
+
+html {
+  font-size: 19px;
+}
+
+@font-face {
+  font-family: 'Roc Grotesk';
+  src: url('/fonts/roc-grotesk-regular.woff2') format('woff2');
+  font-weight: 400;
+}
+@font-face {
+  font-family: 'Roc Grotesk';
+  src: url('/fonts/roc-grotesk-medium.woff2') format('woff2');
+  font-weight: 500;
+}
+@font-face {
+  font-family: 'Azeret Mono';
+  src: url('/fonts/azeret-mono-regular.otf') format('opentype');
+  font-weight: 400;
+}
+
+body {
+  background: var(--color-core-black);
+  color: var(--color-off-white);
+  font-family: 'Roc Grotesk', sans-serif;
+  overflow-x: hidden;
+}
+
+@keyframes glitch {
+  0% { transform: translate(0); }
+  20% { transform: translate(-2px, 2px); }
+  40% { transform: translate(-2px, -2px); }
+  60% { transform: translate(2px, 2px); }
+  80% { transform: translate(2px, -2px); }
+  100% { transform: translate(0); }
+}
+.animate-glitch:hover {
+  animation: glitch 0.3s ease-in-out;
+}

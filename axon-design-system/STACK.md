@@ -1,0 +1,7 @@
+- **Tailwind CSS** — framework CSS utilitário para estilização, layout responsivo e sistema de design
+- **Three.js** — biblioteca gráfica 3D JavaScript para renderização interativa do canvas no cabeçalho
+- **GSAP (GreenSock Animation Platform)** — motor de animação profissional para transições e efeitos de scroll
+- **Swiper** — biblioteca de sliders responsivos para os carrosséis do portfólio e equipe
+- **Formie** — plataforma de construção e processamento de formulários dinâmicos
+- **CookieYes** — gerenciador de consentimento e avisos de privacidade de cookies
+- **Google Tag Manager** — gerenciamento e implementação de scripts de métricas e analytics

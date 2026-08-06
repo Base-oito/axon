@@ -1,0 +1,18 @@
+# Dependências
+node_modules/
+
+# Backups
+*.bak
+*.bak-original
+
+# Logs
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Sistema
+.DS_Store
+Thumbs.db
+
+# Builds temporários (dist é versionado para deploy direto)
+/tmp/

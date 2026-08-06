@@ -1,0 +1,31 @@
+{
+	"name": "WorldQuant Foundry",
+	"icons": [
+		{
+			"src": "/android-192x192.png",
+			"sizes": "192x192",
+			"type": "image/png"
+		},
+		{
+			"src": "/android-512x512.png",
+			"sizes": "512x512",
+			"type": "image/png"
+		},
+		{
+			"src": "/android-maskable-192x192.png",
+			"sizes": "192x192",
+			"type": "image/png",
+			"purpose": "maskable"
+		},
+		{
+			"src": "/android-maskable-512x512.png",
+			"sizes": "512x512",
+			"type": "image/png",
+			"purpose": "maskable"
+		}
+	],
+	"display": "standalone",
+	"shortname": "WQF",
+	"theme_color": "#111111",
+	"background_color": "#111111"
+}
