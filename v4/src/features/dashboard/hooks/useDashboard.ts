@@ -20,7 +20,11 @@ export interface DashboardData {
     tarefas: { total: number; concluidas: number }
     processos: { total: number; concluidos: number }
   }>
-  certificados: { validos: number; vencendo: number; vencidos: number }
+  certificados: {
+    validos: number; vencendo: number; vencidos: number
+    vencendo_lista?: Array<{ id: number; nome: string; cnpj?: string; certificate_expires_at?: string }>
+    vencidos_lista?: Array<{ id: number; nome: string; cnpj?: string; certificate_expires_at?: string }>
+  }
   execucoes_recentes: Array<any>
 }
 
