@@ -141,7 +141,7 @@
     backdrop-filter: blur(16px) saturate(160%);
     -webkit-backdrop-filter: blur(16px) saturate(160%);
     border: 1px solid rgba(255, 255, 255, 0.55);
-    box-shadow: 0 8px 32px rgba(0, 120, 212, 0.12);
+    box-shadow: 0 10px 38px rgba(0, 120, 212, 0.15);
   }
 
   .glass-strong {
@@ -149,7 +149,7 @@
     backdrop-filter: blur(24px) saturate(180%);
     -webkit-backdrop-filter: blur(24px) saturate(180%);
     border: 1px solid rgba(255, 255, 255, 0.65);
-    box-shadow: 0 16px 48px rgba(0, 120, 212, 0.16);
+    box-shadow: 0 20px 56px rgba(0, 120, 212, 0.2);
   }
 
   /* Suavidade Apple/Microsoft — transições e micro-interações */
@@ -160,21 +160,21 @@
 
   /* Divisões quase invisíveis — sombra difusa em vez de linha (estilo tweakcn) */
   .divider-soft {
-    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 4px 12px rgba(15, 23, 42, 0.03);
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05), 0 5px 14px rgba(15, 23, 42, 0.04);
   }
 
   .divider-header {
-    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04), 0 8px 20px -8px rgba(15, 23, 42, 0.05);
+    box-shadow: 0 1px 4px rgba(15, 23, 42, 0.05), 0 10px 24px -8px rgba(15, 23, 42, 0.06);
   }
 
   /* Cards — borda quase invisível + sombra suave (estilo tweakcn) */
   .card-soft {
-    border: 1px solid rgba(15, 23, 42, 0.06);
-    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03), 0 4px 16px rgba(15, 23, 42, 0.04);
+    border: 1px solid rgba(15, 23, 42, 0.07);
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04), 0 5px 20px rgba(15, 23, 42, 0.05);
   }
 
   .card-soft:hover {
-    box-shadow: 0 2px 4px rgba(15, 23, 42, 0.04), 0 12px 28px rgba(15, 23, 42, 0.07);
+    box-shadow: 0 2px 6px rgba(15, 23, 42, 0.05), 0 15px 34px rgba(15, 23, 42, 0.09);
   }
 
   .hover-lift {
