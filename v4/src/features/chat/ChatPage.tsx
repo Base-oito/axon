@@ -274,15 +274,15 @@ export default function ChatPage() {
             const reacs = groupReactions(m.reacoes)
             const msgText = getText(m)
             return (
-              <div key={m.id} className={`group relative flex items-end gap-2 ${isMine ? 'flex-row-reverse' : ''}`}>
+              <div key={m.id} className={`group relative flex gap-2 ${isMine ? 'flex-row-reverse' : ''}`}>
                 {!isMine && avatar(nome)}
-                <div className={`max-w-[70%] ${isMine ? 'text-right' : ''}`}>
-                  {/* Nome + data/hora */}
+                <div className={`flex max-w-[70%] flex-col ${isMine ? 'items-end' : 'items-start'}`}>
+                  {/* Nome + data/hora (alinha com o avatar no topo) */}
                   <div className={`mb-0.5 flex items-baseline gap-2 ${isMine ? 'justify-end' : ''}`}>
                     <span className="text-xs font-semibold text-[#0078d4]">{isMine ? 'Você' : nome}</span>
                     <span className="text-[10px] text-muted-foreground/70">{fmtDateTime(m.created_at)}</span>
                   </div>
-                  {/* Bolha */}
+                  {/* Bolha encaixada abaixo do nome, formando coluna contínua */}
                   <div className={`relative rounded-2xl px-3.5 py-2 text-left ${isMine ? 'rounded-br-md bg-primary text-primary-foreground shadow-md shadow-primary/20' : 'rounded-bl-md bg-muted/60'}`}>
                     {replyTo && replyTo.id === m.id && (
                       <p className={`mb-1 border-l-2 pl-2 text-xs ${isMine ? 'border-white/40 text-white/80' : 'border-[#0078d4]/40 text-muted-foreground'}`}>
