@@ -95,10 +95,12 @@ export default function ChatPage() {
   })
   const { data: mensagens } = useQuery({
     queryKey: ['chat-msgs', activeType, activeId],
-    queryFn: () => {
+    queryFn: async () => {
       const url = activeType === 'channel' ? `/api/chat/mensagens/${activeId}` : `/api/chat/dm/${activeId}`
-      // Backend retorna DESC (mais recentes no topo) — mantém a ordem, igual ao V3
-      return apiFetch<Mensagem[]>(url)
+      const msgs = await apiFetch<Mensagem[]>(url)
+      // Ordem cronológica: mais antigas em cima, mais recentes embaixo
+      return [...(msgs || [])].sort((a, b) =>
+        String(a.created_at || '').localeCompare(String(b.created_at || '')))
     },
     enabled: !!activeType && !!activeId,
     refetchInterval: 10_000,
@@ -167,10 +169,19 @@ export default function ChatPage() {
     onSuccess: () => { setForwardMsg(null); setForwardDest(''); alert('Mensagem encaminhada!') },
   })
 
-  // ── Scroll para o topo (mensagens mais recentes no topo) ──
+  // ── Ao ABRIR uma conversa: posiciona na última mensagem (embaixo).
+  //    Sem rolagem automática nas atualizações seguintes (polling). ──
+  const justOpened = useRef(false)
   useEffect(() => {
-    listRef.current?.scrollTo({ top: 0 })
-  }, [mensagens, activeId])
+    if (!activeType || !activeId) return
+    justOpened.current = true
+    const t = setTimeout(() => {
+      const el = listRef.current
+      if (el) el.scrollTop = el.scrollHeight
+      justOpened.current = false
+    }, 60)
+    return () => clearTimeout(t)
+  }, [activeType, activeId])
 
   // ── Autosize do textarea ─────────────────────────────
   useEffect(() => {
