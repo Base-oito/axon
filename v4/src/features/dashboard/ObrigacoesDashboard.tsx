@@ -1,8 +1,8 @@
 import { useState } from 'react'
-import { useDashboardCompleto } from '../hooks/useDashboard'
-import { useEvolucao } from '../hooks/useEvolucao'
-import { ChartCard, SoftAreaChart, SoftBarChart } from '../components/charts'
-import { KPICard } from '../components/KPICard'
+import { useDashboardCompleto } from './hooks/useDashboard'
+import { useEvolucao } from './hooks/useEvolucao'
+import { ChartCard, SoftAreaChart, SoftBarChart } from './components/charts'
+import { KPICard } from './components/KPICard'
 
 export default function ObrigacoesDashboard() {
   const { data, isLoading } = useDashboardCompleto()
@@ -17,14 +17,14 @@ export default function ObrigacoesDashboard() {
   const depts = data.departamentos
 
   // Filtra departamentos e usuários pelo departamento selecionado
-  const deptsFiltered = deptFilter ? depts.filter(d => String(d.id) === deptFilter) : depts
+  const deptsFiltered = deptFilter ? depts.filter((d: any) => String(d.id) === deptFilter) : depts
   const usuariosFiltrados = deptFilter
-    ? data.usuarios.filter(u => String(u.departamento_id ?? '') === deptFilter)
+    ? data.usuarios.filter((u: any) => String(u.departamento_id ?? '') === deptFilter)
     : data.usuarios
 
   // Colaboradores com obrigações (eficiência)
   const colaboradores = usuariosFiltrados
-    .map(u => ({
+    .map((u: any) => ({
       nome: u.nome,
       total: u.obrigacoes.total,
       concluidas: u.obrigacoes.concluidas,
@@ -32,9 +32,9 @@ export default function ObrigacoesDashboard() {
       eficiencia: u.obrigacoes.total > 0 ? Math.round((u.obrigacoes.concluidas / u.obrigacoes.total) * 100) : 0,
     }))
     .filter(u => u.total > 0)
-    .sort((a, b) => b.eficiencia - a.eficiencia)
+    .sort((a: any, b: any) => b.eficiencia - a.eficiencia)
 
-  const eficBarData = deptsFiltered.map(d => ({
+  const eficBarData = deptsFiltered.map((d: any) => ({
     nome: d.nome,
     concluidas: d.obrigacoes.concluidas,
     pendentes: d.obrigacoes.total - d.obrigacoes.concluidas,
@@ -100,7 +100,7 @@ export default function ObrigacoesDashboard() {
           </div>
         ) : (
           <div className="space-y-3">
-            {colaboradores.map((c, i) => (
+            {colaboradores.map((c: any, i: number) => (
               <div key={i} className="flex items-center gap-3">
                 <span className="w-28 truncate text-right text-xs font-medium text-foreground">{c.nome}</span>
                 <div className="min-w-0 flex-1">
