@@ -2,8 +2,8 @@ import { lazy, Suspense, useEffect, useState } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import LoadingScreen from '@/app/LoadingScreen'
 import AppShell from '@/components/layout/AppShell'
-import Login from '@/features/auth/Login'
 
+const Login = lazy(() => import('@/features/auth/Login'))
 const Dashboard = lazy(() => import('@/features/dashboard/DashboardPage'))
 
 function getToken(): string | null {

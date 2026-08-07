@@ -24,12 +24,12 @@ export default function AppSidebar() {
     <aside
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
-      className={`relative z-30 flex h-full flex-col border-r border-border bg-sidebar transition-[width] duration-200 ease-out ${
+      className={`divider-header relative z-30 flex h-full flex-col bg-sidebar transition-[width] duration-200 ease-out ${
         expanded ? 'w-60' : 'w-16'
       }`}
     >
       {/* Logo */}
-      <div className="flex h-16 items-center gap-2 border-b border-border px-4">
+      <div className="divider-soft flex h-16 items-center gap-2 px-4">
         <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary text-sm font-bold text-primary-foreground">
           A
         </div>

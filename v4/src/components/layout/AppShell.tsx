@@ -6,7 +6,7 @@ export default function AppShell() {
     <div className="flex h-screen w-screen overflow-hidden bg-background">
       <AppSidebar />
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-16 shrink-0 items-center justify-between border-b border-border px-6">
+        <header className="divider-header relative z-20 flex h-16 shrink-0 items-center justify-between bg-background/80 px-6 backdrop-blur-md">
           <div className="text-sm text-muted-foreground">
             Bem-vindo ao Axon
           </div>

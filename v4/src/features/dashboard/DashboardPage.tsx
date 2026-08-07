@@ -9,7 +9,10 @@ export default function DashboardPage() {
           { label: 'Obrigações pendentes', value: '—' },
           { label: 'Valor em ICMS', value: 'R$ —' },
         ].map(card => (
-          <div key={card.label} className="rounded-xl border border-border bg-card p-5 shadow-sm">
+          <div
+            key={card.label}
+            className="card-soft hover-lift rounded-xl bg-card p-5"
+          >
             <p className="text-sm text-muted-foreground">{card.label}</p>
             <p className="mt-2 text-2xl font-bold text-foreground">{card.value}</p>
           </div>
