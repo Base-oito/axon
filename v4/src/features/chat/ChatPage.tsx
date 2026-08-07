@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiFetch, getToken } from '@/lib/api'
-import { Send, MessageSquare, Search, MoreVertical, Reply, Forward, ClipboardList, Trash2, X, Plus, Mic, Paperclip, Square, Trash } from 'lucide-react'
+import { Send, MessageSquare, Search, MoreVertical, Reply, Forward, ClipboardList, Trash2, X, Plus, Mic, Paperclip, Square, Trash, Info } from 'lucide-react'
 
 interface Canal { id: number; nome: string; fixo?: boolean }
 interface Usuario { id: number; display_name?: string; username?: string; role?: string }
@@ -53,6 +53,15 @@ function groupReactions(reacoes: Reacao[] = []): Array<{ reacao: string; count: 
   return Array.from(map.entries()).map(([reacao, count]) => ({ reacao, count }))
 }
 
+function safeAnexos(item: any): any[] {
+  if (!item) return []
+  if (Array.isArray(item)) return item
+  if (typeof item === 'string') {
+    try { return JSON.parse(item) || [] } catch { return [] }
+  }
+  return []
+}
+
 const EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🙏']
 
 export default function ChatPage() {
@@ -69,6 +78,9 @@ export default function ChatPage() {
   const [forwardDestType, setForwardDestType] = useState<'channel' | 'dm'>('channel')
   const [showTaskModal, setShowTaskModal] = useState(false)
   const [taskText, setTaskText] = useState('')
+  const [showDetail, setShowDetail] = useState(false)
+  const [userDetail, setUserDetail] = useState<any>(null)
+  const [userEmpresas, setUserEmpresas] = useState<Array<{ id: number; name: string; cnpj?: string }>>([])
   const [showCreateCanal, setShowCreateCanal] = useState(false)
   const [novoCanal, setNovoCanal] = useState('')
   const [canalMembros, setCanalMembros] = useState<number[]>([])
@@ -317,8 +329,34 @@ export default function ChatPage() {
     ta.style.height = Math.min(ta.scrollHeight, 160) + 'px'
   }, [texto])
 
-  const selectChannel = (c: Canal) => { setActiveType('channel'); setActiveId(c.id); setReplyTo(null) }
-  const selectDM = (u: Usuario) => { setActiveType('dm'); setActiveId(u.id); setReplyTo(null) }
+  const selectChannel = (c: Canal) => { setActiveType('channel'); setActiveId(c.id); setReplyTo(null); setShowDetail(false) }
+  const selectDM = (u: Usuario) => { setActiveType('dm'); setActiveId(u.id); setReplyTo(null); setShowDetail(false) }
+
+  // ── Painel lateral: detalhes do contato + empresas ──
+  const loadDmUserDetail = async (userId: number) => {
+    const t = getToken()
+    if (!t) return
+    try {
+      const [userRes, empresasRes] = await Promise.all([
+        fetch(`/api/usuarios/${userId}`, { headers: { Authorization: 'Bearer ' + t } }),
+        fetch(`/api/usuarios/${userId}/empresas`, { headers: { Authorization: 'Bearer ' + t } }),
+      ])
+      if (userRes.ok) setUserDetail(await userRes.json())
+      if (empresasRes.ok) setUserEmpresas(await empresasRes.json())
+    } catch { /* ignore */ }
+  }
+
+  const toggleDetail = () => {
+    setShowDetail(prev => {
+      if (!prev && activeType === 'dm' && activeId) loadDmUserDetail(activeId)
+      return !prev
+    })
+  }
+
+  const isOnline = (lastActive?: string) => {
+    if (!lastActive) return false
+    return Date.now() - new Date(lastActive).getTime() < 5 * 60_000
+  }
 
   const sortedDMs = (usuarios || [])
     .filter(u => u.id !== me.id)
@@ -409,7 +447,15 @@ export default function ChatPage() {
       <div className="card-soft flex min-w-0 flex-1 flex-col overflow-hidden rounded-lg bg-card">
         <div className="flex items-center gap-2 border-b border-border/60 px-4 py-3">
           {activeType === 'dm' && dmAtivo && avatar(dmAtivo.display_name || dmAtivo.username || '?')}
-          <h2 className="text-sm font-semibold text-foreground">{titulo}</h2>
+          <h2 className="flex-1 text-sm font-semibold text-foreground">{titulo}</h2>
+          {activeType === 'dm' && (
+            <button onClick={toggleDetail}
+              title="Informações do contato"
+              className={`inline-flex h-8 w-8 items-center justify-center rounded-lg transition-colors ${showDetail ? 'bg-[#0078d4]/10 text-[#0078d4]' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}>
+              <Info className="h-4 w-4" />
+              <span className="sr-only">info</span>
+            </button>
+          )}
         </div>
 
         <div ref={listRef} className="flex-1 space-y-4 overflow-y-auto p-4">
@@ -436,9 +482,9 @@ export default function ChatPage() {
                     )}
                     <p className="whitespace-pre-wrap text-sm">{msgText}</p>
                     {/* Anexos */}
-                    {m.anexos && m.anexos.length > 0 && (
+                    {safeAnexos(m.anexos).length > 0 && (
                       <div className="mt-2 space-y-2">
-                        {m.anexos.map((att: any, ai: number) => {
+                        {safeAnexos(m.anexos).map((att: any, ai: number) => {
                           const path = `/api/chat/uploads/${att.path}`
                           const isImage = (att.nome || '').match(/\.(png|jpg|jpeg|gif|webp)$/i) || (att.path || '').match(/\.(png|jpg|jpeg|gif|webp)$/i)
                           const isAudio = (att.nome || '').match(/\.(mp3|wav|ogg|webm|aac|m4a)$/i) || (att.path || '').match(/\.(mp3|wav|ogg|webm|aac|m4a)$/i)
@@ -559,6 +605,70 @@ export default function ChatPage() {
           </button>
         </div>
       </div>
+
+      {/* ── Painel lateral de contato ── */}
+      {showDetail && activeType === 'dm' && userDetail && (
+        <div className="card-soft w-72 shrink-0 overflow-y-auto rounded-lg bg-card">
+          <div className="border-b border-border/60 p-4 text-center">
+            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-[#0078d4]/10 text-2xl font-bold text-[#0078d4]">
+              {(userDetail.display_name || userDetail.username || '?')[0]?.toUpperCase()}
+            </div>
+            <h3 className="mt-3 text-base font-semibold text-foreground">{userDetail.display_name || userDetail.username}</h3>
+            <p className={`mt-1 text-xs ${isOnline(userDetail.last_active) ? 'text-emerald-600' : 'text-muted-foreground'}`}>
+              {isOnline(userDetail.last_active) ? '● Online' : '○ Offline'}
+            </p>
+          </div>
+
+          <div className="space-y-4 p-4">
+            <div className="space-y-2">
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">E-mail</p>
+                <p className="truncate text-sm text-foreground" title={userDetail.username}>{userDetail.username}</p>
+              </div>
+              {userDetail.role_title && (
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Cargo</p>
+                  <p className="text-sm text-foreground">{userDetail.role_title}</p>
+                </div>
+              )}
+              {userDetail.departamento_nome && (
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Departamento</p>
+                  <p className="text-sm text-foreground">{userDetail.departamento_nome}</p>
+                </div>
+              )}
+              {userDetail.ramal && (
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Ramal</p>
+                  <p className="text-sm text-foreground">{userDetail.ramal}</p>
+                </div>
+              )}
+            </div>
+
+            {userEmpresas.length > 0 && (
+              <div>
+                <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  Empresas responsável
+                </p>
+                <div className="space-y-1.5">
+                  {userEmpresas.map(emp => (
+                    <div key={emp.id} className="rounded-lg border border-border/60 bg-muted/30 p-2.5">
+                      <p className="truncate text-xs font-medium text-foreground">{emp.name}</p>
+                      {emp.cnpj && <p className="mt-0.5 font-mono text-[10px] text-muted-foreground">{emp.cnpj}</p>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {userEmpresas.length === 0 && !userDetail.role_title && !userDetail.departamento_nome && !userDetail.ramal && (
+              <p className="py-4 text-center text-xs text-muted-foreground">
+                Nenhuma informação adicional disponível.
+              </p>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* ── Modal de ações da mensagem ── */}
       {menuMsg && (
