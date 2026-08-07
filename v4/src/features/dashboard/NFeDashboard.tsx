@@ -1,5 +1,5 @@
 import { useEvolucao } from './hooks/useEvolucao'
-import { ChartCard, SoftAreaChart, SoftBarChart, SoftDonut, formatBRL } from './components/charts'
+import { ChartCard, SoftAreaChart, SoftBarChart, formatBRL } from './components/charts'
 import { KPIFromSeries } from './components/KPICard'
 
 export default function NFeDashboard() {
@@ -57,22 +57,12 @@ export default function NFeDashboard() {
         </ChartCard>
 
         {/* Por UF */}
-        <ChartCard title="Notas por UF" subtitle="Distribuição das entradas por estado">
-          <div className="grid grid-cols-[1fr_auto] items-center gap-4">
-            <SoftDonut
-              data={data.por_uf.map(u => ({ name: u.uf, value: u.qtd }))}
-              centerValue={String(totalAno)}
-              centerLabel="notas"
-            />
-            <div className="space-y-1.5">
-              {data.por_uf.slice(0, 6).map(u => (
-                <div key={u.uf} className="flex items-center gap-2 text-xs">
-                  <span className="font-semibold text-foreground">{u.uf}</span>
-                  <span className="text-muted-foreground">{u.qtd.toLocaleString('pt-BR')}</span>
-                </div>
-              ))}
-            </div>
-          </div>
+        <ChartCard title="Notas por UF" subtitle="Distribuição das entradas por estado (12 meses)">
+          <SoftBarChart
+            data={data.por_uf}
+            xKey="uf"
+            series={[{ key: 'qtd', name: 'Notas', color: '#0078d4' }]}
+          />
         </ChartCard>
       </div>
 
