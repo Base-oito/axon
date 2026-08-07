@@ -15,7 +15,7 @@ export interface DashboardData {
     processos: { total: number }
   }>
   usuarios: Array<{
-    id: number; nome: string
+    id: number; nome: string; departamento_id?: number | null
     obrigacoes: { total: number; concluidas: number }
     tarefas: { total: number; concluidas: number }
     processos: { total: number; concluidos: number }
