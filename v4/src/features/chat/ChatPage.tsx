@@ -309,19 +309,21 @@ export default function ChatPage() {
     onSuccess: () => { setForwardMsg(null); setForwardDest(''); alert('Mensagem encaminhada!') },
   })
 
-  // ── Ao ABRIR uma conversa: posiciona na última mensagem (embaixo).
-  //    Sem rolagem automática nas atualizações seguintes (polling). ──
+  // ── Ao ABRIR uma conversa: posiciona na última mensagem (embaixo),
+  //    aguardando as mensagens carregarem. Sem rolagem automática depois. ──
   const justOpened = useRef(false)
   useEffect(() => {
     if (!activeType || !activeId) return
     justOpened.current = true
-    const t = setTimeout(() => {
-      const el = listRef.current
-      if (el) el.scrollTop = el.scrollHeight
-      justOpened.current = false
-    }, 60)
-    return () => clearTimeout(t)
+    return () => { justOpened.current = false }
   }, [activeType, activeId])
+
+  useEffect(() => {
+    if (!justOpened.current || !mensagens || mensagens.length === 0) return
+    const el = listRef.current
+    if (el) el.scrollTop = el.scrollHeight
+    justOpened.current = false
+  }, [mensagens])
 
   // ── Autosize do textarea ─────────────────────────────
   useEffect(() => {
