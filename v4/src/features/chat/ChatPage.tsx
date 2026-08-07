@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiFetch, getToken } from '@/lib/api'
-import { Send, MessageSquare, Search, MoreVertical, Reply, Forward, ClipboardList, Trash2, X } from 'lucide-react'
+import { Send, MessageSquare, Search, MoreVertical, Reply, Forward, ClipboardList, Trash2, X, Plus, Mic, Paperclip, Square, Trash } from 'lucide-react'
 
 interface Canal { id: number; nome: string; fixo?: boolean }
 interface Usuario { id: number; display_name?: string; username?: string; role?: string }
@@ -69,6 +69,17 @@ export default function ChatPage() {
   const [forwardDestType, setForwardDestType] = useState<'channel' | 'dm'>('channel')
   const [showTaskModal, setShowTaskModal] = useState(false)
   const [taskText, setTaskText] = useState('')
+  const [showCreateCanal, setShowCreateCanal] = useState(false)
+  const [novoCanal, setNovoCanal] = useState('')
+  const [canalMembros, setCanalMembros] = useState<number[]>([])
+  const [attachments, setAttachments] = useState<Array<{ file: File; preview: string }>>([])
+  const [uploading, setUploading] = useState(false)
+  const [recording, setRecording] = useState(false)
+  const [recTime, setRecTime] = useState(0)
+  const recorderRef = useRef<MediaRecorder | null>(null)
+  const recChunksRef = useRef<Blob[]>([])
+  const recTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
@@ -113,17 +124,132 @@ export default function ChatPage() {
     qc.invalidateQueries({ queryKey: ['chat-unread'] })
   }
 
+  // ── Upload de arquivo (anexo) ────────────────────────
+  const uploadFile = async (file: File): Promise<{ nome: string; path: string }> => {
+    const t = getToken()
+    const formData = new FormData()
+    formData.append('file', file)
+    const r = await fetch('/api/chat/upload', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + t },
+      body: formData,
+    })
+    if (!r.ok) throw new Error('Falha no upload')
+    return r.json()
+  }
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files
+    if (!files) return
+    for (const file of Array.from(files)) {
+      if (file.size > 2 * 1024 * 1024) { alert('Arquivo máximo 2MB'); continue }
+      setAttachments(prev => [...prev, { file, preview: URL.createObjectURL(file) }])
+    }
+    e.target.value = ''
+  }
+
+  const removeAttachment = (idx: number) => {
+    setAttachments(prev => prev.filter((_, i) => i !== idx))
+  }
+
+  // ── Gravação de áudio ────────────────────────────────
+  const supportsMediaRecorder = typeof MediaRecorder !== 'undefined'
+
+  const startRecording = async () => {
+    if (!supportsMediaRecorder) { alert('Gravação de áudio não suportada neste navegador'); return }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const recorder = new MediaRecorder(stream, { mimeType: 'audio/webm' })
+      recChunksRef.current = []
+      recorder.ondataavailable = e => { if (e.data.size > 0) recChunksRef.current.push(e.data) }
+      recorder.onstop = () => {
+        stream.getTracks().forEach(t => t.stop())
+        const blob = new Blob(recChunksRef.current, { type: 'audio/webm' })
+        if (blob.size > 0) {
+          const file = new File([blob], `audio_${Date.now()}.webm`, { type: 'audio/webm' })
+          setAttachments(prev => [...prev, { file, preview: URL.createObjectURL(file) }])
+        }
+      }
+      recorderRef.current = recorder
+      recorder.start()
+      setRecording(true)
+      setRecTime(0)
+      recTimerRef.current = setInterval(() => setRecTime(t => t + 1), 1000)
+    } catch {
+      alert('Não foi possível acessar o microfone')
+    }
+  }
+
+  const stopRecording = () => {
+    recorderRef.current?.stop()
+    recorderRef.current = null
+    setRecording(false)
+    if (recTimerRef.current) clearInterval(recTimerRef.current)
+  }
+
+  // ── Criar canal (admin+) ─────────────────────────────
+  const criarCanal = useMutation({
+    mutationFn: async () => {
+      const t = getToken()
+      const r = await fetch('/api/chat/canais', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + t },
+        body: JSON.stringify({ nome: novoCanal.trim(), tipo: 'texto', membros: canalMembros }),
+      })
+      if (!r.ok) throw new Error('HTTP ' + r.status)
+      return r.json()
+    },
+    onSuccess: () => {
+      setShowCreateCanal(false)
+      setNovoCanal('')
+      setCanalMembros([])
+      qc.invalidateQueries({ queryKey: ['chat-canais'] })
+    },
+    onError: () => alert('Erro ao criar canal'),
+  })
+
+  const excluirCanal = useMutation({
+    mutationFn: async (id: number) => {
+      const t = getToken()
+      const r = await fetch(`/api/chat/canais/${id}`, { method: 'DELETE', headers: { Authorization: 'Bearer ' + t } })
+      if (!r.ok) throw new Error('HTTP ' + r.status)
+      return r.json()
+    },
+    onSuccess: () => {
+      if (activeType === 'channel') { setActiveType(null); setActiveId(null) }
+      qc.invalidateQueries({ queryKey: ['chat-canais'] })
+    },
+    onError: () => alert('Erro ao excluir canal'),
+  })
+
   const enviar = useMutation({
     mutationFn: async (msg: string) => {
       const t = getToken()
+      const currentAttachments = attachments
+      let anexos: any[] | null = null
+      if (currentAttachments.length > 0) {
+        setUploading(true)
+        anexos = []
+        for (const att of currentAttachments) {
+          const result = await uploadFile(att.file)
+          anexos.push(result)
+        }
+        setUploading(false)
+      }
       const body: any = { conteudo: msg }
+      if (anexos) body.anexos = anexos
       if (activeType === 'channel') body.canal_id = activeId
       const url = activeType === 'channel' ? '/api/chat/mensagens' : `/api/chat/dm/${activeId}`
       const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + t }, body: JSON.stringify(body) })
       if (!r.ok) throw new Error('HTTP ' + r.status)
       return r.json()
     },
-    onSuccess: () => { setTexto(''); setReplyTo(null); invalidade() },
+    onSuccess: () => {
+      setTexto('')
+      setReplyTo(null)
+      setAttachments([])
+      invalidade()
+    },
   })
 
   const reagir = useMutation({
@@ -223,8 +349,15 @@ export default function ChatPage() {
     <div className="flex h-full min-h-[calc(100vh-7rem)] gap-4">
       {/* ── Lista de contatos ── */}
       <div className="card-soft flex w-72 shrink-0 flex-col overflow-hidden rounded-lg bg-card">
-        <div className="border-b border-border/60 px-4 py-3">
+        <div className="flex items-center justify-between border-b border-border/60 px-4 py-3">
           <h2 className="text-sm font-semibold text-foreground">Conversas</h2>
+          {IS_ADMIN.includes(me.role) && (
+            <button onClick={() => setShowCreateCanal(true)}
+              className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              title="Novo canal">
+              <Plus className="h-4 w-4" />
+            </button>
+          )}
         </div>
         <div className="border-b border-border/40 px-3 py-2">
           <p className="px-2 pb-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Canais</p>
@@ -302,6 +435,31 @@ export default function ChatPage() {
                       </p>
                     )}
                     <p className="whitespace-pre-wrap text-sm">{msgText}</p>
+                    {/* Anexos */}
+                    {m.anexos && m.anexos.length > 0 && (
+                      <div className="mt-2 space-y-2">
+                        {m.anexos.map((att: any, ai: number) => {
+                          const path = `/api/chat/uploads/${att.path}`
+                          const isImage = (att.nome || '').match(/\.(png|jpg|jpeg|gif|webp)$/i) || (att.path || '').match(/\.(png|jpg|jpeg|gif|webp)$/i)
+                          const isAudio = (att.nome || '').match(/\.(mp3|wav|ogg|webm|aac|m4a)$/i) || (att.path || '').match(/\.(mp3|wav|ogg|webm|aac|m4a)$/i)
+                          return (
+                            <div key={ai}>
+                              {isImage ? (
+                                <img src={path} alt="" className="max-w-[220px] cursor-pointer rounded-lg transition-opacity hover:opacity-80"
+                                  onClick={() => window.open(path, '_blank')} />
+                              ) : isAudio ? (
+                                <audio controls src={path} className="h-8 max-w-full rounded" preload="metadata" />
+                              ) : (
+                                <a href={path} target="_blank" rel="noreferrer"
+                                  className="flex items-center gap-1.5 text-xs text-[#0078d4] hover:underline">
+                                  📎 {att.nome || 'Arquivo'}
+                                </a>
+                              )}
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
                   </div>
                   {/* Reações */}
                   {reacs.length > 0 && (
@@ -339,7 +497,51 @@ export default function ChatPage() {
           </div>
         )}
 
+        {/* Preview de anexos */}
+        {attachments.length > 0 && (
+          <div className="flex flex-wrap gap-2 border-t border-border/60 bg-muted/30 p-3">
+            {attachments.map((att, i) => {
+              const isImg = att.file.type.startsWith('image/')
+              const isAudio = att.file.type.startsWith('audio/')
+              return (
+                <div key={i} className="relative">
+                  {isImg ? (
+                    <img src={att.preview} alt="" className="h-16 w-16 rounded-lg object-cover" />
+                  ) : isAudio ? (
+                    <audio controls src={att.preview} className="h-10 w-48 rounded" />
+                  ) : (
+                    <span className="flex h-16 w-16 items-center justify-center rounded-lg bg-card text-2xl">📎</span>
+                  )}
+                  <button onClick={() => removeAttachment(i)}
+                    className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-rose-500 text-white shadow-md hover:bg-rose-600">
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              )
+            })}
+          </div>
+        )}
+
         <div className="flex items-end gap-2 border-t border-border/60 p-3">
+          <input ref={fileInputRef} type="file" multiple hidden onChange={handleFileSelect} />
+          <button onClick={() => fileInputRef.current?.click()} disabled={!activeType || uploading}
+            title="Anexar arquivo (máx. 2MB)"
+            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-card text-muted-foreground transition-colors hover:bg-muted disabled:opacity-40">
+            <Paperclip className="h-4 w-4" />
+          </button>
+          {!recording ? (
+            <button onClick={startRecording} disabled={!activeType}
+              title="Gravar áudio"
+              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-card text-muted-foreground transition-colors hover:bg-muted disabled:opacity-40">
+              <Mic className="h-4 w-4" />
+            </button>
+          ) : (
+            <button onClick={stopRecording}
+              title={`Parar gravação (${recTime}s)`}
+              className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg bg-rose-500 px-3 text-xs font-medium text-white shadow-md transition-colors hover:bg-rose-600">
+              <Square className="h-3.5 w-3.5" /> {recTime}s
+            </button>
+          )}
           <textarea
             ref={textareaRef}
             value={texto}
@@ -391,6 +593,12 @@ export default function ChatPage() {
                   <Trash2 className="h-4 w-4" /> Apagar (admin)
                 </button>
               )}
+              {IS_ADMIN.includes(me.role) && activeType === 'channel' && (
+                <button onClick={() => { if (confirm('Excluir este canal? As mensagens serão removidas.')) excluirCanal.mutate(activeId!); setMenuMsg(null) }}
+                  className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-rose-600 hover:bg-rose-50">
+                  <Trash className="h-4 w-4" /> Excluir canal (admin)
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -418,6 +626,46 @@ export default function ChatPage() {
               <button onClick={() => { if (forwardDest) encaminhar.mutate({ text: getText(forwardMsg), destType: forwardDestType, dest: forwardDest }) }}
                 disabled={!forwardDest} className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-md shadow-primary/30 hover:bg-primary/90 disabled:opacity-40">
                 Encaminhar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal de novo canal (admin+) ── */}
+      {showCreateCanal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={() => setShowCreateCanal(false)}>
+          <div className="glass-strong w-full max-w-sm rounded-xl p-5" onClick={e => e.stopPropagation()}>
+            <h3 className="text-sm font-semibold text-foreground">Novo canal</h3>
+            <input
+              value={novoCanal}
+              onChange={e => setNovoCanal(e.target.value)}
+              placeholder="Nome do canal…"
+              autoFocus
+              className="mt-3 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+            />
+            <div className="mt-3">
+              <p className="mb-1.5 text-xs font-medium text-muted-foreground">Membros</p>
+              <div className="max-h-40 space-y-0.5 overflow-y-auto rounded-lg border border-border/60 p-1.5">
+                {(usuarios || []).filter(u => u.id !== me.id).map(u => {
+                  const nome = u.display_name || u.username || '?'
+                  const checked = canalMembros.includes(u.id)
+                  return (
+                    <label key={u.id} className="flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-muted">
+                      <input type="checkbox" checked={checked}
+                        onChange={() => setCanalMembros(prev => checked ? prev.filter(x => x !== u.id) : [...prev, u.id])}
+                        className="h-4 w-4 accent-[#0078d4]" />
+                      {nome}
+                    </label>
+                  )
+                })}
+              </div>
+            </div>
+            <div className="mt-4 flex justify-end gap-2">
+              <button onClick={() => setShowCreateCanal(false)} className="rounded-lg px-3 py-2 text-sm text-muted-foreground hover:bg-muted">Cancelar</button>
+              <button onClick={() => { if (novoCanal.trim()) criarCanal.mutate() }} disabled={!novoCanal.trim() || criarCanal.isPending}
+                className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-md shadow-primary/30 hover:bg-primary/90 disabled:opacity-40">
+                Criar canal
               </button>
             </div>
           </div>
