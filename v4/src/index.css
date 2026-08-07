@@ -88,7 +88,7 @@
     --popover-foreground: oklch(0.9850 0 0);
     --primary: oklch(0.5677 0.1665 251.3134);
     --primary-foreground: oklch(1.0000 0 0);
-    --secondary: oklch(0.5677 0.1665 251.3134);
+    --secondary: oklch(0.2690 0 0);
     --secondary-foreground: oklch(0.9850 0 0);
     --muted: oklch(0.2690 0 0);
     --muted-foreground: oklch(0.7080 0 0);
@@ -150,6 +150,26 @@
     -webkit-backdrop-filter: blur(24px) saturate(180%);
     border: 1px solid rgba(255, 255, 255, 0.65);
     box-shadow: 0 16px 48px rgba(0, 120, 212, 0.16);
+  }
+
+  /* Suavidade Apple/Microsoft — transições e micro-interações */
+  .transition-apple {
+    transition-timing-function: cubic-bezier(0.25, 0.1, 0.25, 1);
+    transition-duration: 0.35s;
+  }
+
+  .hover-lift {
+    transition: transform 0.35s cubic-bezier(0.25, 0.1, 0.25, 1),
+      box-shadow 0.35s cubic-bezier(0.25, 0.1, 0.25, 1);
+  }
+
+  .hover-lift:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 12px 32px rgba(0, 120, 212, 0.14);
+  }
+
+  .text-balance {
+    text-wrap: balance;
   }
 }
 

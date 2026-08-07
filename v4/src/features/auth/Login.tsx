@@ -45,8 +45,11 @@ export default function Login() {
         <div className="absolute top-1/3 right-1/4 h-64 w-64 rounded-full bg-cyan-300/10 blur-3xl" />
       </div>
 
-      <div className="glass-strong relative w-full max-w-md rounded-2xl p-8">
+      <div className="glass-strong hover-lift relative w-full max-w-md rounded-2xl p-8">
         <div className="mb-8 text-center">
+          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary text-2xl font-bold text-primary-foreground shadow-lg shadow-primary/25">
+            A
+          </div>
           <h1 className="text-3xl font-bold tracking-tight text-foreground">
             Axon
           </h1>
