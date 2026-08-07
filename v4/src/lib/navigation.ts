@@ -21,15 +21,17 @@ export const NAV_SECTIONS: NavSection[] = [
     label: 'Dashboard',
     icon: LayoutDashboard,
     items: [
-      { label: 'Visão geral', icon: LayoutDashboard, path: '/dashboard' },
+      { label: 'NF-e (entradas)', icon: FileText, path: '/dashboard/nfe' },
+      { label: 'NFS-e (serviços)', icon: FileText, path: '/dashboard/nfse' },
+      { label: 'Obrigações', icon: CalendarClock, path: '/dashboard/obrigacoes' },
+      { label: 'Processos & Tarefas', icon: Workflow, path: '/dashboard/processos' },
     ],
   },
   {
     label: 'Documentos',
     icon: FileText,
     items: [
-      { label: 'NF-e', icon: FileText, path: '/documentos/nfe' },
-      { label: 'NFS-e', icon: FileText, path: '/documentos/nfse' },
+      { label: 'Documentos', icon: FileText, path: '/documentos' },
       { label: 'Relatórios', icon: FileText, path: '/documentos/relatorios' },
       { label: 'Eventos', icon: FileText, path: '/documentos/eventos' },
     ],

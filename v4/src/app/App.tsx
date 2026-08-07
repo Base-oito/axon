@@ -4,7 +4,10 @@ import LoadingScreen from '@/app/LoadingScreen'
 import AppShell from '@/components/layout/AppShell'
 
 const Login = lazy(() => import('@/features/auth/Login'))
-const Dashboard = lazy(() => import('@/features/dashboard/DashboardPage'))
+const NFeDashboard = lazy(() => import('@/features/dashboard/NFeDashboard'))
+const NfseDashboard = lazy(() => import('@/features/dashboard/NfseDashboard'))
+const ObrigacoesDashboard = lazy(() => import('@/features/dashboard/ObrigacoesDashboard'))
+const ProcessosDashboard = lazy(() => import('@/features/dashboard/ProcessosDashboard'))
 
 function getToken(): string | null {
   try {
@@ -35,8 +38,11 @@ export default function App() {
             </RequireAuth>
           }
         >
-          <Route index element={<Navigate to="/dashboard" replace />} />
-          <Route path="dashboard" element={<Dashboard />} />
+          <Route index element={<Navigate to="/dashboard/nfe" replace />} />
+          <Route path="dashboard/nfe" element={<NFeDashboard />} />
+          <Route path="dashboard/nfse" element={<NfseDashboard />} />
+          <Route path="dashboard/obrigacoes" element={<ObrigacoesDashboard />} />
+          <Route path="dashboard/processos" element={<ProcessosDashboard />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
