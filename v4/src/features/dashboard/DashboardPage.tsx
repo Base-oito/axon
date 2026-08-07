@@ -11,7 +11,7 @@ export default function DashboardPage() {
         ].map(card => (
           <div
             key={card.label}
-            className="card-soft hover-lift rounded-xl bg-card p-5"
+            className="card-soft hover-lift rounded-lg bg-card p-5"
           >
             <p className="text-sm text-muted-foreground">{card.label}</p>
             <p className="mt-2 text-2xl font-bold text-foreground">{card.value}</p>

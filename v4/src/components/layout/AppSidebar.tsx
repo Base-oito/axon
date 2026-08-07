@@ -73,7 +73,7 @@ export default function AppSidebar() {
 
                 {/* Submenu flutuante — quando recolhido e com hover */}
                 {!expanded && isHovered && (
-                  <div className="absolute left-full top-0 z-50 ml-2 w-56 rounded-xl border border-border bg-popover p-1.5 shadow-lg">
+                  <div className="absolute left-full top-0 z-50 ml-2 w-56 rounded-lg border border-border bg-popover p-1.5 shadow-lg">
                     <p className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                       {section.label}
                     </p>
