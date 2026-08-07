@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiFetch, getToken } from '@/lib/api'
-import { Send, MessageSquare, Search, MoreVertical, Reply, Forward, ClipboardList, Trash2, X, Plus, Mic, Paperclip, Square, Trash, Info, Copy, Users } from 'lucide-react'
+import { Send, MessageSquare, Search, MoreVertical, Reply, Forward, ClipboardList, Trash2, X, Plus, Mic, Paperclip, Square, Trash, Info, Copy, Users, Pin } from 'lucide-react'
 
 interface Canal { id: number; nome: string; fixo?: boolean }
 interface Usuario { id: number; display_name?: string; username?: string; role?: string }
@@ -83,6 +83,9 @@ export default function ChatPage() {
   const [userEmpresas, setUserEmpresas] = useState<Array<{ id: number; name: string; cnpj?: string }>>([])
   const [participantes, setParticipantes] = useState<Array<{ user_id: number; display_name: string; username: string; last_active?: string }>>([])
   const [participantSearch, setParticipantSearch] = useState('')
+  const [pinnedUsers, setPinnedUsers] = useState<number[]>(() => {
+    try { return JSON.parse(localStorage.getItem('chat_pinned_users') || '[]') } catch { return [] }
+  })
   const [showCreateCanal, setShowCreateCanal] = useState(false)
   const [novoCanal, setNovoCanal] = useState('')
   const [canalMembros, setCanalMembros] = useState<number[]>([])
@@ -338,6 +341,24 @@ export default function ChatPage() {
   const selectChannel = (c: Canal) => { setActiveType('channel'); setActiveId(c.id); setReplyTo(null); setShowDetail(false) }
   const selectDM = (u: Usuario) => { setActiveType('dm'); setActiveId(u.id); setReplyTo(null); setShowDetail(false) }
 
+  const fecharConversa = () => {
+    setActiveType(null)
+    setActiveId(null)
+    setReplyTo(null)
+    setShowDetail(false)
+    setDmSearch('')
+    setParticipantSearch('')
+  }
+
+  // ── Fixar contatos (topo da lista, persistido localmente) ──
+  const togglePin = (userId: number) => {
+    setPinnedUsers(prev => {
+      const next = prev.includes(userId) ? prev.filter(x => x !== userId) : [...prev, userId]
+      localStorage.setItem('chat_pinned_users', JSON.stringify(next))
+      return next
+    })
+  }
+
   // ── Painel lateral: detalhes do contato + empresas ──
   const loadDmUserDetail = async (userId: number) => {
     const t = getToken()
@@ -411,6 +432,9 @@ export default function ChatPage() {
     .filter(u => u.id !== me.id)
     .filter(u => !dmSearch || (u.display_name || u.username || '').toLowerCase().includes(dmSearch.toLowerCase()))
     .sort((a, b) => {
+      const aPin = pinnedUsers.includes(a.id)
+      const bPin = pinnedUsers.includes(b.id)
+      if (aPin !== bPin) return aPin ? -1 : 1
       const ua = unread?.[`dm-${a.id}`]; const ub = unread?.[`dm-${b.id}`]
       if (ua?.count && !ub?.count) return -1
       if (ub?.count && !ua?.count) return 1
@@ -475,16 +499,27 @@ export default function ChatPage() {
               const un = getUnread('dm', u.id)
               const active = activeType === 'dm' && activeId === u.id
               const nome = u.display_name || u.username || '?'
+              const pinned = pinnedUsers.includes(u.id)
               return (
-                <button key={u.id} onClick={() => selectDM(u)}
-                  className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-sm transition-colors ${active ? 'bg-primary text-primary-foreground shadow-md shadow-primary/30' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}>
-                  {avatar(nome)}
-                  <span className="min-w-0 flex-1 text-left">
-                    <span className="block truncate">{nome}</span>
-                    <span className="block text-[10px] text-muted-foreground/70">{lastTimes?.[`dm-${u.id}`] ? new Date(lastTimes[`dm-${u.id}`]).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }) : ''}</span>
-                  </span>
+                <div key={u.id} className={`group flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-sm transition-colors ${active ? 'bg-primary text-primary-foreground shadow-md shadow-primary/30' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}>
+                  <button onClick={() => selectDM(u)} className="flex min-w-0 flex-1 items-center gap-2.5 text-left">
+                    {avatar(nome)}
+                    <span className="min-w-0 flex-1">
+                      <span className="flex items-center gap-1 truncate">
+                        {pinned && <Pin className={`h-3 w-3 shrink-0 ${active ? 'text-primary-foreground' : 'text-[#0078d4]'}`} />}
+                        <span className="truncate">{nome}</span>
+                      </span>
+                      <span className="block text-[10px] text-muted-foreground/70">{lastTimes?.[`dm-${u.id}`] ? new Date(lastTimes[`dm-${u.id}`]).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }) : ''}</span>
+                    </span>
+                  </button>
                   {un > 0 && <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-primary px-1.5 text-[10px] font-bold text-primary-foreground">{un}</span>}
-                </button>
+                  <button
+                    onClick={() => togglePin(u.id)}
+                    title={pinned ? 'Desafixar' : 'Fixar no topo'}
+                    className={`shrink-0 rounded p-1 opacity-0 transition-opacity group-hover:opacity-100 ${pinned ? 'text-[#0078d4]' : 'text-muted-foreground hover:text-[#0078d4]'}`}>
+                    <Pin className={`h-3.5 w-3.5 ${pinned ? 'fill-[#0078d4]' : ''}`} />
+                  </button>
+                </div>
               )
             })}
             {sortedDMs.length === 0 && <p className="px-2 py-2 text-xs text-muted-foreground">Nenhum contato encontrado.</p>}
@@ -511,6 +546,22 @@ export default function ChatPage() {
               className={`inline-flex h-8 w-8 items-center justify-center rounded-lg transition-colors ${showDetail ? 'bg-[#0078d4]/10 text-[#0078d4]' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}>
               <Info className="h-4 w-4" />
               <span className="sr-only">info</span>
+            </button>
+          )}
+          {activeType === 'channel' && IS_ADMIN.includes(me.role) && (
+            <button
+              onClick={() => { if (confirm('Excluir este canal? As mensagens serão removidas.')) excluirCanal.mutate(activeId!) }}
+              title="Excluir canal (admin)"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-rose-50 hover:text-rose-600">
+              <Trash className="h-4 w-4" />
+            </button>
+          )}
+          {activeType && (
+            <button
+              onClick={fecharConversa}
+              title="Fechar conversa"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+              <X className="h-4 w-4" />
             </button>
           )}
         </div>
