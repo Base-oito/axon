@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiFetch, getToken } from '@/lib/api'
-import { Send, MessageSquare, Search, MoreVertical, Reply, Forward, ClipboardList, Trash2, X, Plus, Mic, Paperclip, Square, Trash, Info } from 'lucide-react'
+import { Send, MessageSquare, Search, MoreVertical, Reply, Forward, ClipboardList, Trash2, X, Plus, Mic, Paperclip, Square, Trash, Info, Copy } from 'lucide-react'
 
 interface Canal { id: number; nome: string; fixo?: boolean }
 interface Usuario { id: number; display_name?: string; username?: string; role?: string }
@@ -623,7 +623,16 @@ export default function ChatPage() {
             <div className="space-y-2">
               <div>
                 <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">E-mail</p>
-                <p className="truncate text-sm text-foreground" title={userDetail.username}>{userDetail.username}</p>
+                <div className="group flex items-center gap-1.5">
+                  <p className="truncate text-sm text-foreground" title={userDetail.username}>{userDetail.username}</p>
+                  <button
+                    onClick={() => { navigator.clipboard.writeText(userDetail.username); alert('E-mail copiado!') }}
+                    title="Copiar e-mail"
+                    className="shrink-0 rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-foreground group-hover:opacity-100"
+                  >
+                    <Copy className="h-3.5 w-3.5" />
+                  </button>
+                </div>
               </div>
               {userDetail.role_title && (
                 <div>
