@@ -23,6 +23,7 @@ import MonitorClientesPage from './pages/MonitorClientes'
 import ChatPoller from './components/ChatPoller'
 import QuickSearch from './components/QuickSearch'
 import NotificationBell from './components/NotificationBell'
+import ComunicadoModal from './components/ComunicadoModal'
 import { ToastProvider } from './components/Toast'
 
 function GlobalBell() {
@@ -60,6 +61,7 @@ export default function App() {
         <ChatPoller />
         <QuickSearch />
         <GlobalBell />
+        <ComunicadoModal />
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/dashboard" element={<DashboardPage />} />

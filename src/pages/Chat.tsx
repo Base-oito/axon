@@ -312,6 +312,8 @@ export default function Chat() {
 
   useEffect(() => {
     if (!activeType || !activeId) return
+    const pollType = activeType
+    const pollId = activeId
     let lastUnreadTotal = 0
     const interval = setInterval(async () => {
       const t = getToken()
@@ -334,14 +336,14 @@ export default function Chat() {
         lastUnreadTotal = total
       } catch {}
       // Also poll messages for the active conversation
-      const url = type === 'channel' ? `/api/chat/mensagens/${id}` : `/api/chat/dm/${id}`
+      const url = pollType === 'channel' ? `/api/chat/mensagens/${pollId}` : `/api/chat/dm/${pollId}`
       fetch(url, { headers: { Authorization: 'Bearer ' + t } })
         .then(r => r.json()).then(data => {
-          if (Array.isArray(data) && id === activeIdRef.current && type === activeTypeRef.current) {
+          if (Array.isArray(data) && pollId === activeIdRef.current && pollType === activeTypeRef.current) {
             setMensagens(data)
           }
         }).catch(() => {})
-    }, 5000)
+    }, 15000)
     return () => clearInterval(interval)
   }, [activeType, activeId])
 

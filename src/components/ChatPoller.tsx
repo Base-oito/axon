@@ -53,7 +53,7 @@ export default function ChatPoller() {
           }
         }
       } catch {}
-    }, 10000)
+    }, 30000)
     return () => clearInterval(interval)
   }, [])
 

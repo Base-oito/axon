@@ -54,6 +54,25 @@ function getToken(): string | null {
   try { return JSON.parse(localStorage.getItem('nfse_token') || '{}').access_token } catch { return null }
 }
 
+function sortDocs(docs: any[], key: string, dir: 'asc' | 'desc'): any[] {
+  if (!key) return docs
+  const sorted = [...docs].sort((a: any, b: any) => {
+    let va: any = a[key]
+    let vb: any = b[key]
+    if (key === 'issued_at' || key === 'created_at') {
+      va = a[key] || ''; vb = b[key] || ''
+    } else if (key === 'total_value' || key === 'v_icms') {
+      va = Number(a[key] || 0); vb = Number(b[key] || 0)
+    } else {
+      va = String(a[key] ?? '').toLowerCase(); vb = String(b[key] ?? '').toLowerCase()
+    }
+    if (va < vb) return -1
+    if (va > vb) return 1
+    return 0
+  })
+  return dir === 'asc' ? sorted : sorted.reverse()
+}
+
 export default function Dashboard() {
   const navigate = useNavigate()
   const [tab, setTab] = useState('performance')
@@ -68,6 +87,9 @@ export default function Dashboard() {
   const [docFrom, setDocFrom] = useState('')
   const [docTo, setDocTo] = useState('')
   const [docQuery, setDocQuery] = useState('')
+  const [showEvents, setShowEvents] = useState(false)
+  const [sortKey, setSortKey] = useState<string>('')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
   const [cliList, setCliList] = useState<Array<{ id: number; name: string }>>([])
   const [docs, setDocs] = useState<Array<any>>([])
   const [docLoading, setDocLoading] = useState(false)
@@ -103,6 +125,7 @@ export default function Dashboard() {
       if (docTo) params.set('issued_to', docTo)
       if (docMov) params.set('movement_type', docMov)
       if (docQuery) params.set('search', docQuery)
+      if (showEvents && docType !== 'nfse') params.set('show_events', 'true')
 
       const needsNfse = docType === 'nfse' || docType === 'todas'
       const needsNfe = docType === 'mercadorias' || docType === 'todas'
@@ -121,7 +144,6 @@ export default function Dashboard() {
          emitente: d.issuer_name || d.counterparty_name || '-',
        }))
        const nfeList = (nfeRes.documents || [])
-         .filter((d: any) => !d.is_event)
          .map((d: any) => ({
            ...d,
            tipo: 'NF-e',
@@ -133,7 +155,7 @@ export default function Dashboard() {
 
        const all = [...nfseList, ...nfeList]
        all.sort((a: any, b: any) => (b.created_at || b.issued_at || '').localeCompare(a.created_at || a.issued_at || ''))
-       setDocs(all)
+       setDocs(sortDocs(all, sortKey, sortDir))
        setDocPage(page)
        setDocTotal((nfseRes.total || 0) + (nfeRes.total || 0))
 
@@ -154,8 +176,20 @@ export default function Dashboard() {
 
    const [docTotals, setDocTotals] = useState({ valor: 0, icms: 0, pis: 0, cofins: 0, ipi: 0, frete: 0, prod: 0 })
   const [excelLoading, setExcelLoading] = useState(false)
+  const displayDocs = sortDocs(docs, sortKey, sortDir)
 
-  useEffect(() => { if (tab === 'documentos') { setDocPage(0); loadDocs(0) } }, [tab, docType, docMov, docCli, docFrom, docTo])
+  useEffect(() => { if (tab === 'documentos') { setDocPage(0); loadDocs(0) } }, [tab, docType, docMov, docCli, docFrom, docTo, showEvents])
+
+  const toggleSort = (key: string) => {
+    setSortKey(prev => {
+      const nextKey = prev === key ? key : key
+      return nextKey
+    })
+    setSortDir(prev => {
+      if (sortKey !== key) return 'desc'
+      return prev === 'desc' ? 'asc' : 'desc'
+    })
+  }
 
   const downloadPdfReport = async () => {
     const t = getToken(); if (!t) return
@@ -164,6 +198,7 @@ export default function Dashboard() {
     if (docCli) body.cliente_id = docCli
     if (docFrom) body.issued_from = docFrom
     if (docTo) body.issued_to = docTo
+    if (showEvents) body.show_events = true
     try {
       const r = await fetch('/api/relatorios/pdf', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + t }, body: JSON.stringify(body) })
       const blob = await r.blob()
@@ -181,6 +216,7 @@ export default function Dashboard() {
     if (docCli) body.cliente_id = docCli
     if (docFrom) body.issued_from = docFrom
     if (docTo) body.issued_to = docTo
+    if (showEvents) body.show_events = true
     try {
       const r = await fetch('/api/relatorios/excel', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + t }, body: JSON.stringify(body) })
       if (!r.ok) throw new Error('HTTP ' + r.status)
@@ -199,6 +235,7 @@ export default function Dashboard() {
     if (docCli) body.cliente_id = docCli
     if (docFrom) body.issued_from = docFrom
     if (docTo) body.issued_to = docTo
+    if (showEvents) body.show_events = true
     try {
       const r = await fetch('/api/relatorios/xml-zip', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + t }, body: JSON.stringify(body) })
       const blob = await r.blob()
@@ -626,6 +663,13 @@ export default function Dashboard() {
                     <input type="text" value={docQuery} onChange={e => setDocQuery(e.target.value)} placeholder="Emitente ou chave..."
                       className="bg-core-black border border-urban-smoke rounded-lg px-3 py-2 text-xs text-off-white placeholder-pulse-ash focus:outline-none focus:border-electric-teal w-44" />
                   </div>
+                  <div className="flex items-end pb-2">
+                    <label className="flex items-center gap-2 text-xs text-pulse-ash cursor-pointer select-none">
+                      <input type="checkbox" checked={showEvents} onChange={e => setShowEvents(e.target.checked)}
+                        className="accent-electric-teal w-4 h-4" />
+                      Incluir eventos
+                    </label>
+                  </div>
                   <button onClick={() => { setDocPage(0); loadDocs(0) }}
                     className="px-4 py-2 rounded-lg text-xs tracking-wider bg-electric-teal text-white hover:bg-electric-teal/80 transition-colors">
                     {docLoading ? 'Carregando...' : 'Buscar'}
@@ -661,32 +705,44 @@ export default function Dashboard() {
                 <table className="w-full text-xs">
                   <thead>
                     <tr className="border-b border-urban-smoke text-pulse-ash tracking-wider">
-                      <th className="text-left py-2 pr-3">Tipo</th>
-                      <th className="text-left py-2 pr-3">Mov.</th>
-                      <th className="text-left py-2 pr-3">Nº</th>
-                      <th className="text-left py-2 pr-3">Cliente</th>
-                      <th className="text-left py-2 pr-3">Emitente</th>
-                      <th className="text-left py-2 pr-3">Chave/NF</th>
-                      <th className="text-right py-2 pr-3">Valor</th>
-                      <th className="text-right py-2 pr-1">ICMS</th>
-                      <th className="text-right py-2 pr-1">PIS/COF</th>
-                      <th className="text-right py-2 pr-3">Data</th>
+                      {[
+                        ['tipo', 'Tipo'], ['movimento', 'Mov.'], ['status', 'Evento'],
+                        ['numero', 'Nº'], ['client_name', 'Cliente'], ['emitente', 'Emitente'],
+                        ['access_key', 'Chave/NF'], ['total_value', 'Valor'], ['v_icms', 'ICMS'],
+                        ['piscof', 'PIS/COF'], ['issued_at', 'Data'],
+                      ].map(([k, label]) => (
+                        <th key={k} onClick={() => toggleSort(k as string)}
+                          className={`text-left py-2 pr-3 cursor-pointer select-none hover:text-off-white transition-colors ${
+                            sortKey === k ? 'text-electric-teal' : ''
+                          }`}>
+                          {label} {sortKey === k ? (sortDir === 'asc' ? '▲' : '▼') : ''}
+                        </th>
+                      ))}
                       <th className="text-center py-2">XML</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {(docs || []).map((doc: any) => {
+                    {(displayDocs || []).map((doc: any) => {
                       const isNfe = doc.tipo === 'NF-e'
                       const icms = isNfe ? (doc.v_icms || 0) : null
-                      const pisCof = isNfe ? (doc.v_pis || 0) + (doc.v_cofins || 0) : null
+                      const piscof = isNfe ? (doc.v_pis || 0) + (doc.v_cofins || 0) : null
+                      const rowDoc = isNfe ? { ...doc, piscof } : { ...doc }
                       return (
                       <tr key={doc.id} className="border-b border-urban-smoke/20 hover:bg-urban-smoke/30 transition-colors">
                         <td className="py-2 pr-3">
                           <span className={`px-2 py-0.5 rounded text-xs tracking-wider ${
                             doc.tipo === 'NFS-e' ? 'bg-electric-teal/10 text-electric-teal' : 'bg-purple-900/30 text-purple-400'
                           }`}>{doc.tipo}</span>
+                          {doc.is_event && (
+                            <span className="ml-1 px-2 py-0.5 rounded text-xs tracking-wider bg-amber-500/10 text-amber-400">EVENTO</span>
+                          )}
                         </td>
-                        <td className="py-2 pr-3 text-pulse-ash">{doc.movimento}</td>
+                        <td className="py-2 pr-3 text-pulse-ash">
+                          {doc.is_event ? (doc.status || doc.movimento || 'evento') : doc.movimento}
+                        </td>
+                        <td className="py-2 pr-3">
+                          {doc.is_event ? (doc.status || 'evento') : '-'}
+                        </td>
                         <td className="py-2 pr-3 font-mono text-[11px] text-pulse-ash">{doc.numero || '-'}</td>
                         <td className="py-2 pr-3">{doc.client_name || doc.cliente_nome || '-'}</td>
                         <td className="py-2 pr-3 text-pulse-ash truncate max-w-[180px]">{doc.emitente || '-'}</td>
@@ -696,7 +752,7 @@ export default function Dashboard() {
                           {icms != null && icms > 0 ? `R$ ${icms.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : icms != null ? '-' : ''}
                         </td>
                         <td className="py-2 pr-1 text-right text-xs text-pulse-ash whitespace-nowrap">
-                          {pisCof != null && pisCof > 0 ? `R$ ${pisCof.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : pisCof != null ? '-' : ''}
+                          {piscof != null && piscof > 0 ? `R$ ${piscof.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : piscof != null ? '-' : ''}
                         </td>
                         <td className="py-2 pr-3 text-right text-pulse-ash whitespace-nowrap">{doc.issued_at ? new Date(doc.issued_at.replace(/-03:00|T.*/, '') + 'T00:00:00').toLocaleDateString('pt-BR') : '-'}</td>
                         <td className="py-2 text-center">
