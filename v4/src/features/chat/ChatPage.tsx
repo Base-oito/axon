@@ -95,9 +95,11 @@ export default function ChatPage() {
   })
   const { data: mensagens } = useQuery({
     queryKey: ['chat-msgs', activeType, activeId],
-    queryFn: () => {
+    queryFn: async () => {
       const url = activeType === 'channel' ? `/api/chat/mensagens/${activeId}` : `/api/chat/dm/${activeId}`
-      return apiFetch<Mensagem[]>(url)
+      const msgs = await apiFetch<Mensagem[]>(url)
+      // Backend retorna DESC (mais recentes primeiro); inverte para ordem cronológica
+      return [...(msgs || [])].reverse()
     },
     enabled: !!activeType && !!activeId,
     refetchInterval: 10_000,
