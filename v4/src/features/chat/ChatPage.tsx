@@ -95,11 +95,10 @@ export default function ChatPage() {
   })
   const { data: mensagens } = useQuery({
     queryKey: ['chat-msgs', activeType, activeId],
-    queryFn: async () => {
+    queryFn: () => {
       const url = activeType === 'channel' ? `/api/chat/mensagens/${activeId}` : `/api/chat/dm/${activeId}`
-      const msgs = await apiFetch<Mensagem[]>(url)
-      // Backend retorna DESC (mais recentes primeiro); inverte para ordem cronológica
-      return [...(msgs || [])].reverse()
+      // Backend retorna DESC (mais recentes no topo) — mantém a ordem, igual ao V3
+      return apiFetch<Mensagem[]>(url)
     },
     enabled: !!activeType && !!activeId,
     refetchInterval: 10_000,
@@ -168,9 +167,9 @@ export default function ChatPage() {
     onSuccess: () => { setForwardMsg(null); setForwardDest(''); alert('Mensagem encaminhada!') },
   })
 
-  // ── Scroll para baixo ────────────────────────────────
+  // ── Scroll para o topo (mensagens mais recentes no topo) ──
   useEffect(() => {
-    listRef.current?.scrollTo({ top: listRef.current.scrollHeight })
+    listRef.current?.scrollTo({ top: 0 })
   }, [mensagens, activeId])
 
   // ── Autosize do textarea ─────────────────────────────
