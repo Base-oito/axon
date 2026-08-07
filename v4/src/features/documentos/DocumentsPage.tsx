@@ -65,7 +65,10 @@ export default function DocumentsPage() {
 
   const { data: clientes } = useQuery({
     queryKey: ['clientes'],
-    queryFn: () => apiFetch<Array<{ id: number; nome: string }>>('/api/clientes'),
+    queryFn: async () => {
+      const raw = await apiFetch<Array<{ id: number; name?: string; nome?: string }>>('/api/clientes')
+      return (raw || []).map(c => ({ id: c.id, nome: c.nome || c.name || `Cliente ${c.id}` }))
+    },
     staleTime: 10 * 60_000,
   })
 
