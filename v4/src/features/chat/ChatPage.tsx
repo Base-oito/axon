@@ -35,7 +35,7 @@ function getUserId(): { id: number; role: string } {
   return { id: 0, role: '' }
 }
 
-const IS_ADMIN = ['administrador', 'lider', 'super_admin']
+const IS_ADMIN = ['administrador', 'super_admin']
 
 function fmtDateTime(d?: string) {
   if (!d) return ''
