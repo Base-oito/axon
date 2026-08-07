@@ -93,6 +93,7 @@ export default function ChatPage() {
   const [uploading, setUploading] = useState(false)
   const [recording, setRecording] = useState(false)
   const [recTime, setRecTime] = useState(0)
+  const [dragOver, setDragOver] = useState(false)
   const recorderRef = useRef<MediaRecorder | null>(null)
   const recChunksRef = useRef<Blob[]>([])
   const recTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -160,11 +161,34 @@ export default function ChatPage() {
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files
     if (!files) return
-    for (const file of Array.from(files)) {
-      if (file.size > 2 * 1024 * 1024) { alert('Arquivo máximo 2MB'); continue }
+    addFiles(Array.from(files))
+    e.target.value = ''
+  }
+
+  const addFiles = (files: File[]) => {
+    for (const file of files) {
+      if (file.size > 2 * 1024 * 1024) { alert(`Arquivo "${file.name}" excede 2MB`); continue }
       setAttachments(prev => [...prev, { file, preview: URL.createObjectURL(file) }])
     }
-    e.target.value = ''
+  }
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault()
+    setDragOver(true)
+  }
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault()
+    setDragOver(false)
+  }
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    setDragOver(false)
+    if (!activeType) return
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      addFiles(Array.from(e.dataTransfer.files))
+    }
   }
 
   const removeAttachment = (idx: number) => {
@@ -178,14 +202,23 @@ export default function ChatPage() {
     if (!supportsMediaRecorder) { alert('Gravação de áudio não suportada neste navegador'); return }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      const recorder = new MediaRecorder(stream, { mimeType: 'audio/webm' })
+      // Detecta mimeType suportado (Chrome: audio/webm; Firefox: audio/ogg; fallback sem mime)
+      const mimeTypes = ['audio/webm', 'audio/webm;codecs=opus', 'audio/ogg;codecs=opus', 'audio/mp4']
+      const mimeType = mimeTypes.find(m => MediaRecorder.isTypeSupported(m))
+      let recorder: MediaRecorder
+      try {
+        recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream)
+      } catch {
+        recorder = new MediaRecorder(stream)
+      }
+      const ext = (recorder.mimeType || '').includes('ogg') ? 'ogg' : (recorder.mimeType || '').includes('mp4') ? 'm4a' : 'webm'
       recChunksRef.current = []
       recorder.ondataavailable = e => { if (e.data.size > 0) recChunksRef.current.push(e.data) }
       recorder.onstop = () => {
         stream.getTracks().forEach(t => t.stop())
-        const blob = new Blob(recChunksRef.current, { type: 'audio/webm' })
+        const blob = new Blob(recChunksRef.current, { type: recorder.mimeType || 'audio/webm' })
         if (blob.size > 0) {
-          const file = new File([blob], `audio_${Date.now()}.webm`, { type: 'audio/webm' })
+          const file = new File([blob], `audio_${Date.now()}.${ext}`, { type: recorder.mimeType || 'audio/webm' })
           setAttachments(prev => [...prev, { file, preview: URL.createObjectURL(file) }])
         }
       }
@@ -528,7 +561,19 @@ export default function ChatPage() {
       </div>
 
       {/* ── Conversa ── */}
-      <div className="card-soft flex min-w-0 flex-1 flex-col overflow-hidden rounded-lg bg-card">
+      <div
+        className="card-soft relative flex min-w-0 flex-1 flex-col overflow-hidden rounded-lg bg-card"
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+      >
+        {dragOver && (
+          <div className="pointer-events-none absolute inset-0 z-40 flex items-center justify-center border-2 border-dashed border-[#0078d4] bg-[#0078d4]/5">
+            <p className="rounded-lg bg-card px-4 py-2 text-sm font-medium text-[#0078d4] shadow-lg">
+              Solte para anexar
+            </p>
+          </div>
+        )}
         <div className="flex items-center gap-2 border-b border-border/60 px-4 py-3">
           {activeType === 'dm' && dmAtivo && avatar(dmAtivo.display_name || dmAtivo.username || '?')}
           <h2 className="flex-1 truncate text-sm font-semibold text-foreground">{titulo}</h2>
