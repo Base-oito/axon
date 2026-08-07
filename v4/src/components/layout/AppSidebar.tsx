@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
+import { ChevronDown, ChevronRight } from 'lucide-react'
 import { NAV_SECTIONS } from '@/lib/navigation'
 
 export default function AppSidebar() {
@@ -7,6 +8,7 @@ export default function AppSidebar() {
   const location = useLocation()
   const [expanded, setExpanded] = useState(false)
   const [hoverSection, setHoverSection] = useState<string | null>(null)
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>({})
   const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const handleMouseEnter = () => {
@@ -21,11 +23,47 @@ export default function AppSidebar() {
     }, 150)
   }
 
-  // Rota ativa: verifica se o path atual começa com o item (ex: /documentos/nfe)
   const isItemActive = (path: string) =>
     location.pathname === path || location.pathname.startsWith(path + '/')
 
   const sectionActive = (paths: string[]) => paths.some(p => isItemActive(p))
+
+  const toggleSection = (label: string) => {
+    setOpenSections(prev => ({ ...prev, [label]: !prev[label] }))
+  }
+
+  const renderSectionButton = (section: (typeof NAV_SECTIONS)[number], isActive: boolean, isHovered: boolean) => {
+    const Icon = section.icon
+    return (
+      <button
+        onClick={() => {
+          // Expandido: toggle o submenu; recolhido: navega pro primeiro item
+          if (expanded && section.items.length > 1) {
+            toggleSection(section.label)
+          } else {
+            navigate(section.items[0].path)
+          }
+        }}
+        className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors transition-apple ${
+          isActive
+            ? 'bg-primary text-primary-foreground shadow-md shadow-primary/30'
+            : isHovered
+              ? 'bg-primary/10 text-primary'
+              : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+        }`}
+      >
+        <Icon className="h-5 w-5 shrink-0" />
+        {expanded && (
+          <>
+            <span className="min-w-0 flex-1 truncate text-left">{section.label}</span>
+            {section.items.length > 1 && (
+              openSections[section.label] ? <ChevronDown className="h-4 w-4 shrink-0" /> : <ChevronRight className="h-4 w-4 shrink-0" />
+            )}
+          </>
+        )}
+      </button>
+    )
+  }
 
   return (
     <aside
@@ -47,9 +85,9 @@ export default function AppSidebar() {
       <nav className="flex-1 overflow-y-auto overflow-x-visible py-3">
         <ul className="space-y-1 px-2">
           {NAV_SECTIONS.map(section => {
-            const Icon = section.icon
             const isHovered = hoverSection === section.label
             const isActive = sectionActive(section.items.map(i => i.path))
+            const isOpen = openSections[section.label] || isActive
             return (
               <li
                 key={section.label}
@@ -57,19 +95,7 @@ export default function AppSidebar() {
                 onMouseEnter={() => setHoverSection(section.label)}
                 onMouseLeave={() => setHoverSection(null)}
               >
-                <button
-                  onClick={() => navigate(section.items[0].path)}
-                  className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors transition-apple ${
-                    isActive
-                      ? 'bg-primary text-primary-foreground shadow-md shadow-primary/30'
-                      : isHovered
-                        ? 'bg-primary/10 text-primary'
-                        : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-                  }`}
-                >
-                  <Icon className="h-5 w-5 shrink-0" />
-                  {expanded && <span className="truncate">{section.label}</span>}
-                </button>
+                {renderSectionButton(section, isActive, isHovered)}
 
                 {/* Submenu flutuante — quando recolhido e com hover */}
                 {!expanded && isHovered && (
@@ -98,6 +124,27 @@ export default function AppSidebar() {
                       </button>
                     ))}
                   </div>
+                )}
+
+                {/* Submenu inline — quando expandido e a seção está aberta */}
+                {expanded && isOpen && (
+                  <ul className="mt-0.5 space-y-0.5 pl-4">
+                    {section.items.map(item => (
+                      <li key={item.path}>
+                        <button
+                          onClick={() => navigate(item.path)}
+                          className={`flex w-full items-center gap-2.5 rounded-lg py-1.5 pl-3 pr-3 text-sm transition-colors transition-apple ${
+                            isItemActive(item.path)
+                              ? 'bg-primary text-primary-foreground shadow-md shadow-primary/30'
+                              : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                          }`}
+                        >
+                          <item.icon className="h-4 w-4 shrink-0" />
+                          <span className="min-w-0 flex-1 truncate text-left">{item.label}</span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
                 )}
               </li>
             )
