@@ -1,6 +1,6 @@
 const BASE = '/api/v2'
 
-function getToken(): string | null {
+export function getToken(): string | null {
   try {
     return JSON.parse(localStorage.getItem('nfse_token') || '{}').access_token
   } catch {

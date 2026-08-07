@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { apiFetch } from '@/lib/api'
+import { apiFetch, getToken } from '@/lib/api'
+import { FileSpreadsheet, FileText as FileTextIcon, FileArchive } from 'lucide-react'
 
 interface Doc {
   id: number
@@ -100,6 +101,39 @@ export default function DocumentsPage() {
 
   const total = (needsNfe ? nfe?.total || 0 : 0) + (needsNfse ? nfse?.total || 0 : 0)
 
+  const buildReportBody = () => {
+    const body: any = { doc_type: tipo === 'todas' ? 'both' : tipo }
+    if (cliente) body.cliente_id = cliente
+    if (from) body.issued_from = from
+    if (to) body.issued_to = to
+    if (showEvents) body.show_events = true
+    return body
+  }
+
+  const downloadReport = async (endpoint: string, filename: string) => {
+    const t = getToken()
+    if (!t) return
+    try {
+      const r = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + t },
+        body: JSON.stringify(buildReportBody()),
+      })
+      if (!r.ok) throw new Error(`HTTP ${r.status}`)
+      const blob = await r.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = filename
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch {
+      alert('Erro ao gerar o relatório')
+    }
+  }
+
+  const [excelLoading, setExcelLoading] = useState(false)
+
   const HeadBtn = ({ k, children }: { k: SortKey; children: React.ReactNode }) => (
     <th
       onClick={() => toggleSort(k)}
@@ -113,9 +147,35 @@ export default function DocumentsPage() {
 
   return (
     <div className="space-y-5">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight text-foreground">Documentos</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Notas fiscais capturadas automaticamente</p>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight text-foreground">Documentos</h1>
+          <p className="mt-1 text-sm text-muted-foreground">Notas fiscais capturadas automaticamente</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={() => downloadReport('/api/relatorios/pdf', 'relatorio-fiscal.pdf')}
+            className="inline-flex items-center gap-2 rounded-lg bg-primary px-3.5 py-2 text-xs font-medium text-primary-foreground shadow-md shadow-primary/30 transition-colors hover:bg-primary/90"
+          >
+            <FileTextIcon className="h-4 w-4" />
+            Relatório PDF
+          </button>
+          <button
+            onClick={() => { setExcelLoading(true); downloadReport('/api/relatorios/excel', 'relatorio-fiscal.xlsx').finally(() => setExcelLoading(false)) }}
+            disabled={excelLoading}
+            className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-3.5 py-2 text-xs font-medium text-foreground transition-colors hover:bg-muted disabled:opacity-50"
+          >
+            <FileSpreadsheet className="h-4 w-4 text-emerald-600" />
+            {excelLoading ? 'Gerando Excel…' : 'Relatório Excel'}
+          </button>
+          <button
+            onClick={() => downloadReport('/api/relatorios/xml-zip', 'xmls.zip')}
+            className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-3.5 py-2 text-xs font-medium text-foreground transition-colors hover:bg-muted"
+          >
+            <FileArchive className="h-4 w-4 text-amber-600" />
+            Baixar XMLs (ZIP)
+          </button>
+        </div>
       </div>
 
       {/* Filtros */}

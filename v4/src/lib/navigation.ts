@@ -31,12 +31,10 @@ export const NAV_SECTIONS: NavSection[] = [
     label: 'Documentos',
     icon: FileText,
     items: [
-      { label: 'Documentos', icon: FileText, path: '/documentos' },
-      { label: 'Relatórios', icon: FileText, path: '/documentos/relatorios' },
+      { label: 'Relatórios', icon: FileText, path: '/documentos' },
       { label: 'Eventos', icon: FileText, path: '/documentos/eventos' },
     ],
-  },
-  {
+  },  {
     label: 'Chat',
     icon: MessageSquare,
     items: [
