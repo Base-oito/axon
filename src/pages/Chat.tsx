@@ -291,7 +291,7 @@ export default function Chat() {
       const r = await fetch(url, { headers: { Authorization: 'Bearer ' + t } })
       const data = await r.json()
       if (seq !== loadSeqRef.current || id !== activeIdRef.current || type !== activeTypeRef.current) return
-      if (Array.isArray(data)) setMensagens(data)
+      if (Array.isArray(data)) setMensagens([...data].reverse())
       if (!search) {
         const readUrl = type === 'channel' ? `/api/chat/canais/${id}/read` : `/api/chat/dm/${id}/read`
         fetch(readUrl, { method: 'POST', headers: { Authorization: 'Bearer ' + t } }).catch(() => {})
@@ -340,7 +340,7 @@ export default function Chat() {
       fetch(url, { headers: { Authorization: 'Bearer ' + t } })
         .then(r => r.json()).then(data => {
           if (Array.isArray(data) && pollId === activeIdRef.current && pollType === activeTypeRef.current) {
-            setMensagens(data)
+            setMensagens([...data].reverse())
           }
         }).catch(() => {})
     }, 15000)

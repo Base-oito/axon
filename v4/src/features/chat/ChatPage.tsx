@@ -129,9 +129,9 @@ export default function ChatPage() {
     staleTime: 5_000,
   })
 
-  // Ordem do backend (DESC): mais recentes no topo, igual ao V3
+  // Ordem cronológica: mais antigas em cima, mais recentes embaixo
   const mensagensOrdenadas = [...(mensagens || [])].sort((a, b) =>
-    String(b.created_at || '').localeCompare(String(a.created_at || '')))
+    String(a.created_at || '').localeCompare(String(b.created_at || '')))
 
   // ── Ações ────────────────────────────────────────────
   const invalidade = () => {
@@ -323,7 +323,7 @@ export default function ChatPage() {
   useEffect(() => {
     if (!justOpened.current || !mensagensOrdenadas || mensagensOrdenadas.length === 0) return
     const el = listRef.current
-    if (el) el.scrollTop = 0
+    if (el) el.scrollTop = el.scrollHeight
     justOpened.current = false
   }, [mensagensOrdenadas])
 
