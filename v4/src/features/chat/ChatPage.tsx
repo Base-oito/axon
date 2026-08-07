@@ -120,16 +120,18 @@ export default function ChatPage() {
   })
   const { data: mensagens } = useQuery({
     queryKey: ['chat-msgs', activeType, activeId],
-    queryFn: async () => {
+    queryFn: () => {
       const url = activeType === 'channel' ? `/api/chat/mensagens/${activeId}` : `/api/chat/dm/${activeId}`
-      const msgs = await apiFetch<Mensagem[]>(url)
-      // Ordem cronológica: mais antigas em cima, mais recentes embaixo
-      return [...(msgs || [])].sort((a, b) =>
-        String(a.created_at || '').localeCompare(String(b.created_at || '')))
+      return apiFetch<Mensagem[]>(url)
     },
     enabled: !!activeType && !!activeId,
     refetchInterval: 10_000,
+    staleTime: 5_000,
   })
+
+  // Ordem cronológica: mais antigas em cima, mais recentes embaixo
+  const mensagensOrdenadas = [...(mensagens || [])].sort((a, b) =>
+    String(a.created_at || '').localeCompare(String(b.created_at || '')))
 
   // ── Ações ────────────────────────────────────────────
   const invalidade = () => {
@@ -319,11 +321,11 @@ export default function ChatPage() {
   }, [activeType, activeId])
 
   useEffect(() => {
-    if (!justOpened.current || !mensagens || mensagens.length === 0) return
+    if (!justOpened.current || !mensagensOrdenadas || mensagensOrdenadas.length === 0) return
     const el = listRef.current
     if (el) el.scrollTop = el.scrollHeight
     justOpened.current = false
-  }, [mensagens])
+  }, [mensagensOrdenadas])
 
   // ── Autosize do textarea ─────────────────────────────
   useEffect(() => {
@@ -514,7 +516,7 @@ export default function ChatPage() {
         </div>
 
         <div ref={listRef} className="flex-1 space-y-4 overflow-y-auto p-4">
-          {(mensagens || []).map(m => {
+          {mensagensOrdenadas.map(m => {
             const isMine = m.de_user_id === me.id
             const nome = m.de_user_name || m.sender_name || '—'
             const reacs = groupReactions(m.reacoes)
@@ -583,7 +585,7 @@ export default function ChatPage() {
               </div>
             )
           })}
-          {activeType && (mensagens || []).length === 0 && (
+          {activeType && mensagensOrdenadas.length === 0 && (
             <p className="py-8 text-center text-sm text-muted-foreground">Nenhuma mensagem nesta conversa.</p>
           )}
         </div>
