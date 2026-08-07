@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import { NAV_SECTIONS } from '@/lib/navigation'
@@ -28,12 +28,21 @@ export default function AppSidebar() {
 
   const sectionActive = (paths: string[]) => paths.some(p => isItemActive(p))
 
+  // Abre automaticamente a seção da rota atual (sem impedir o usuário de recolher)
+  useEffect(() => {
+    const activeSection = NAV_SECTIONS.find(s => sectionActive(s.items.map(i => i.path)))
+    if (activeSection) {
+      setOpenSections(prev => ({ ...prev, [activeSection.label]: true }))
+    }
+  }, [location.pathname])
+
   const toggleSection = (label: string) => {
     setOpenSections(prev => ({ ...prev, [label]: !prev[label] }))
   }
 
   const renderSectionButton = (section: (typeof NAV_SECTIONS)[number], isActive: boolean, isHovered: boolean) => {
     const Icon = section.icon
+    const isOpen = !!openSections[section.label]
     return (
       <button
         onClick={() => {
@@ -57,7 +66,7 @@ export default function AppSidebar() {
           <>
             <span className="min-w-0 flex-1 truncate text-left">{section.label}</span>
             {section.items.length > 1 && (
-              openSections[section.label] ? <ChevronDown className="h-4 w-4 shrink-0" /> : <ChevronRight className="h-4 w-4 shrink-0" />
+              isOpen ? <ChevronDown className="h-4 w-4 shrink-0" /> : <ChevronRight className="h-4 w-4 shrink-0" />
             )}
           </>
         )}
@@ -87,7 +96,7 @@ export default function AppSidebar() {
           {NAV_SECTIONS.map(section => {
             const isHovered = hoverSection === section.label
             const isActive = sectionActive(section.items.map(i => i.path))
-            const isOpen = openSections[section.label] || isActive
+            const isOpen = !!openSections[section.label]
             return (
               <li
                 key={section.label}
