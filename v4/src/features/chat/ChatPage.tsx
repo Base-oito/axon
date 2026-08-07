@@ -554,7 +554,7 @@ export default function ChatPage() {
                                 <audio controls src={path} className="h-8 max-w-full rounded" preload="metadata" />
                               ) : (
                                 <a href={path} target="_blank" rel="noreferrer"
-                                  className="flex items-center gap-1.5 text-xs text-[#0078d4] hover:underline">
+                                  className={`flex items-center gap-1.5 text-xs hover:underline ${isMine ? 'text-white/90' : 'text-slate-600'}`}>
                                   📎 {att.nome || 'Arquivo'}
                                 </a>
                               )}
