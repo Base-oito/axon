@@ -16,3 +16,4 @@ Thumbs.db
 
 # Builds temporários (dist é versionado para deploy direto)
 /tmp/
+v4/tsconfig.tsbuildinfo
