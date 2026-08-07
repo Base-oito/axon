@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiFetch, getToken } from '@/lib/api'
-import { Send, MessageSquare, Search, MoreVertical, Reply, Forward, ClipboardList, Trash2, X, Plus, Mic, Paperclip, Square, Trash, Info, Copy } from 'lucide-react'
+import { Send, MessageSquare, Search, MoreVertical, Reply, Forward, ClipboardList, Trash2, X, Plus, Mic, Paperclip, Square, Trash, Info, Copy, Users } from 'lucide-react'
 
 interface Canal { id: number; nome: string; fixo?: boolean }
 interface Usuario { id: number; display_name?: string; username?: string; role?: string }
@@ -81,6 +81,8 @@ export default function ChatPage() {
   const [showDetail, setShowDetail] = useState(false)
   const [userDetail, setUserDetail] = useState<any>(null)
   const [userEmpresas, setUserEmpresas] = useState<Array<{ id: number; name: string; cnpj?: string }>>([])
+  const [participantes, setParticipantes] = useState<Array<{ user_id: number; display_name: string; username: string; last_active?: string }>>([])
+  const [participantSearch, setParticipantSearch] = useState('')
   const [showCreateCanal, setShowCreateCanal] = useState(false)
   const [novoCanal, setNovoCanal] = useState('')
   const [canalMembros, setCanalMembros] = useState<number[]>([])
@@ -349,8 +351,51 @@ export default function ChatPage() {
   const toggleDetail = () => {
     setShowDetail(prev => {
       if (!prev && activeType === 'dm' && activeId) loadDmUserDetail(activeId)
+      if (!prev && activeType === 'channel' && activeId) loadParticipants(activeId)
       return !prev
     })
+  }
+
+  // ── Participantes do canal ──
+  const loadParticipants = async (canalId: number) => {
+    const t = getToken()
+    if (!t) return
+    try {
+      const r = await fetch(`/api/chat/canais/${canalId}/participantes`, { headers: { Authorization: 'Bearer ' + t } })
+      if (r.ok) setParticipantes(await r.json())
+    } catch { /* ignore */ }
+  }
+
+  const addParticipant = async (userId: number) => {
+    const t = getToken()
+    if (!t || !activeId) return
+    try {
+      const r = await fetch(`/api/chat/canais/${activeId}/participantes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + t },
+        body: JSON.stringify({ user_id: userId }),
+      })
+      if (r.ok) {
+        await loadParticipants(activeId)
+        qc.invalidateQueries({ queryKey: ['chat-canais'] })
+      }
+    } catch { /* ignore */ }
+  }
+
+  const removeParticipant = async (userId: number) => {
+    const t = getToken()
+    if (!t || !activeId) return
+    if (!confirm('Remover este participante do canal?')) return
+    try {
+      const r = await fetch(`/api/chat/canais/${activeId}/participantes/${userId}`, {
+        method: 'DELETE',
+        headers: { Authorization: 'Bearer ' + t },
+      })
+      if (r.ok) {
+        await loadParticipants(activeId)
+        qc.invalidateQueries({ queryKey: ['chat-canais'] })
+      }
+    } catch { /* ignore */ }
   }
 
   const isOnline = (lastActive?: string) => {
@@ -447,7 +492,15 @@ export default function ChatPage() {
       <div className="card-soft flex min-w-0 flex-1 flex-col overflow-hidden rounded-lg bg-card">
         <div className="flex items-center gap-2 border-b border-border/60 px-4 py-3">
           {activeType === 'dm' && dmAtivo && avatar(dmAtivo.display_name || dmAtivo.username || '?')}
-          <h2 className="flex-1 text-sm font-semibold text-foreground">{titulo}</h2>
+          <h2 className="flex-1 truncate text-sm font-semibold text-foreground">{titulo}</h2>
+          {activeType === 'channel' && (
+            <button onClick={toggleDetail}
+              title="Membros do canal"
+              className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-2 text-xs transition-colors ${showDetail ? 'bg-[#0078d4]/10 text-[#0078d4]' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}>
+              <Users className="h-4 w-4" />
+              {participantes.length > 0 ? participantes.length : 'Membros'}
+            </button>
+          )}
           {activeType === 'dm' && (
             <button onClick={toggleDetail}
               title="Informações do contato"
@@ -606,7 +659,70 @@ export default function ChatPage() {
         </div>
       </div>
 
-      {/* ── Painel lateral de contato ── */}
+      {/* ── Painel lateral de membros (canal) ── */}
+      {showDetail && activeType === 'channel' && (
+        <div className="card-soft flex w-72 shrink-0 flex-col overflow-hidden rounded-lg bg-card">
+          <div className="border-b border-border/60 px-4 py-3">
+            <h3 className="text-sm font-semibold text-foreground">Membros do canal</h3>
+            <p className="text-xs text-muted-foreground">{participantes.length} participantes</p>
+          </div>
+
+          {IS_ADMIN.includes(me.role) && (
+            <div className="border-b border-border/40 p-3">
+              <div className="relative">
+                <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                <input
+                  value={participantSearch}
+                  onChange={e => setParticipantSearch(e.target.value)}
+                  placeholder="Adicionar usuário…"
+                  className="w-full rounded-md border border-input bg-background py-1.5 pl-8 pr-3 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                />
+              </div>
+              <div className="mt-1.5 max-h-32 space-y-0.5 overflow-y-auto">
+                {(usuarios || [])
+                  .filter(u => u.id !== me.id)
+                  .filter(u => !participantes.find(p => p.user_id === u.id))
+                  .filter(u => !participantSearch || (u.display_name || u.username || '').toLowerCase().includes(participantSearch.toLowerCase()))
+                  .slice(0, 10)
+                  .map(u => (
+                    <button key={u.id} onClick={() => addParticipant(u.id)}
+                      className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+                      <Plus className="h-3.5 w-3.5 text-[#0078d4]" />
+                      {u.display_name || u.username}
+                    </button>
+                  ))}
+              </div>
+            </div>
+          )}
+
+          <div className="flex-1 space-y-0.5 overflow-y-auto p-2">
+            {participantes.map(p => {
+              const online = p.last_active ? Date.now() - new Date(p.last_active).getTime() < 5 * 60_000 : false
+              return (
+                <div key={p.user_id} className="group flex items-center gap-2.5 rounded-lg px-2 py-1.5 hover:bg-muted/40">
+                  <span className="relative flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#0078d4]/10 text-xs font-bold text-[#0078d4]">
+                    {(p.display_name || p.username || '?')[0]?.toUpperCase()}
+                    <span className={`absolute bottom-0 right-0 h-2 w-2 rounded-full border-2 border-card ${online ? 'bg-emerald-500' : 'bg-muted'}`} />
+                  </span>
+                  <span className="min-w-0 flex-1 truncate text-sm text-foreground">{p.display_name || p.username}</span>
+                  {IS_ADMIN.includes(me.role) && p.user_id !== me.id && (
+                    <button onClick={() => removeParticipant(p.user_id)}
+                      title="Remover do canal"
+                      className="rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-rose-50 hover:text-rose-600 group-hover:opacity-100">
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+              )
+            })}
+            {participantes.length === 0 && (
+              <p className="px-2 py-4 text-center text-xs text-muted-foreground">Nenhum participante.</p>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Painel lateral de contato (DM) ── */}
       {showDetail && activeType === 'dm' && userDetail && (
         <div className="card-soft w-72 shrink-0 overflow-y-auto rounded-lg bg-card">
           <div className="border-b border-border/60 p-4 text-center">
