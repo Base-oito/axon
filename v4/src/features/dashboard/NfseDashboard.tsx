@@ -1,9 +1,12 @@
-import { useEvolucao } from './hooks/useEvolucao'
+import { useState } from 'react'
+import { useEvolucao, type DashboardFilters } from './hooks/useEvolucao'
 import { ChartCard, SoftAreaChart, SoftBarChart, SoftDonut, formatBRL } from './components/charts'
 import { KPIFromSeries } from './components/KPICard'
+import { DashboardFilters as FilterBar } from './components/DashboardFilters'
 
 export default function NfseDashboard() {
-  const { data, isLoading } = useEvolucao(12)
+  const [filters, setFilters] = useState<DashboardFilters>({})
+  const { data, isLoading } = useEvolucao(12, filters)
 
   if (isLoading || !data) {
     return <div className="text-sm text-muted-foreground">Carregando indicadores de NFS-e…</div>
@@ -27,6 +30,8 @@ export default function NfseDashboard() {
           Captura automática via ADN Nacional · {data.months} meses
         </p>
       </div>
+
+      <FilterBar filters={filters} onChange={setFilters} />
 
       {/* KPIs */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

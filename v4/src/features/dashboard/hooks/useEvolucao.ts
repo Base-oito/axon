@@ -21,10 +21,22 @@ export interface EvolucaoData {
   por_uf: Array<{ uf: string; qtd: number }>
 }
 
-export function useEvolucao(months = 12) {
+export interface DashboardFilters {
+  cliente_id?: string
+  issued_from?: string
+  issued_to?: string
+}
+
+export function useEvolucao(months = 12, filters: DashboardFilters = {}) {
+  const params = new URLSearchParams({ months: String(months) })
+  if (filters.cliente_id) params.set('cliente_id', filters.cliente_id)
+  if (filters.issued_from) params.set('issued_from', filters.issued_from)
+  if (filters.issued_to) params.set('issued_to', filters.issued_to)
+  const qs = params.toString()
+
   return useQuery({
-    queryKey: ['dashboard', 'evolucao', months],
-    queryFn: () => apiFetch<EvolucaoData>(`/dashboard/evolucao?months=${months}`),
+    queryKey: ['dashboard', 'evolucao', qs],
+    queryFn: () => apiFetch<EvolucaoData>(`/dashboard/evolucao?${qs}`),
     staleTime: 5 * 60_000,
   })
 }

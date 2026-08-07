@@ -10,7 +10,8 @@ function getToken(): string | null {
 
 export async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = getToken()
-  const res = await fetch(`${BASE}${path}`, {
+  const url = path.startsWith('/api') ? path : `${BASE}${path}`
+  const res = await fetch(url, {
     ...options,
     headers: {
       'Content-Type': 'application/json',
