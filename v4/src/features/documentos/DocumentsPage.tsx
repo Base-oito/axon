@@ -113,29 +113,26 @@ export default function DocumentsPage() {
     return body
   }
 
-  const downloadReport = async (endpoint: string, filename: string) => {
+  const [excelLoading, setExcelLoading] = useState(false)
+  const [reportMsg, setReportMsg] = useState('')
+
+  const enqueueReport = async (tipo: string) => {
     const t = getToken()
     if (!t) return
+    const body = { tipo, ...buildReportBody() }
     try {
-      const r = await fetch(endpoint, {
+      const r = await fetch('/api/relatorios', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + t },
-        body: JSON.stringify(buildReportBody()),
+        body: JSON.stringify(body),
       })
-      if (!r.ok) throw new Error(`HTTP ${r.status}`)
-      const blob = await r.blob()
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = filename
-      a.click()
-      URL.revokeObjectURL(url)
-    } catch {
-      alert('Erro ao gerar o relatório')
+      const d = await r.json().catch(() => ({}))
+      if (!r.ok) throw new Error(d.detail || `HTTP ${r.status}`)
+      setReportMsg(`Relatório ${tipo === 'pdf' ? 'PDF' : tipo === 'excel' ? 'Excel' : 'XML'} em segundo plano — você pode continuar navegando. A notificação chega com o download.`)
+    } catch (e: unknown) {
+      alert('Erro ao gerar relatório: ' + (e instanceof Error ? e.message : ''))
     }
   }
-
-  const [excelLoading, setExcelLoading] = useState(false)
 
   const HeadBtn = ({ k, children }: { k: SortKey; children: React.ReactNode }) => (
     <th
@@ -157,14 +154,14 @@ export default function DocumentsPage() {
         </div>
         <div className="flex flex-wrap gap-2">
           <button
-            onClick={() => downloadReport('/api/relatorios/pdf', 'relatorio-fiscal.pdf')}
+            onClick={() => enqueueReport('pdf')}
             className="inline-flex items-center gap-2 rounded-lg bg-primary px-3.5 py-2 text-xs font-medium text-primary-foreground shadow-md shadow-primary/30 transition-colors hover:bg-primary/90"
           >
             <FileTextIcon className="h-4 w-4" />
             Relatório PDF
           </button>
           <button
-            onClick={() => { setExcelLoading(true); downloadReport('/api/relatorios/excel', 'relatorio-fiscal.xlsx').finally(() => setExcelLoading(false)) }}
+            onClick={() => { setExcelLoading(true); enqueueReport('excel').finally(() => setExcelLoading(false)) }}
             disabled={excelLoading}
             className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-3.5 py-2 text-xs font-medium text-foreground transition-colors hover:bg-muted disabled:opacity-50"
           >
@@ -172,14 +169,25 @@ export default function DocumentsPage() {
             {excelLoading ? 'Gerando Excel…' : 'Relatório Excel'}
           </button>
           <button
-            onClick={() => downloadReport('/api/relatorios/xml-zip', 'xmls.zip')}
+            onClick={() => enqueueReport('xmlzip')}
             className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-3.5 py-2 text-xs font-medium text-foreground transition-colors hover:bg-muted"
           >
             <FileArchive className="h-4 w-4 text-amber-600" />
             Baixar XMLs (ZIP)
           </button>
+          <a href="/documentos/relatorios"
+            className="inline-flex items-center gap-2 rounded-lg border border-[#0078d4]/40 bg-[#0078d4]/10 px-3.5 py-2 text-xs font-medium text-[#0078d4] transition-colors hover:bg-[#0078d4]/20">
+            Acompanhar relatórios
+          </a>
         </div>
       </div>
+
+      {reportMsg && (
+        <div className="flex items-start justify-between gap-4 rounded-lg border border-[#0078d4]/30 bg-[#0078d4]/10 px-4 py-3 text-xs text-[#0078d4]">
+          <span>{reportMsg}</span>
+          <button onClick={() => setReportMsg('')} className="text-muted-foreground transition-colors hover:text-foreground">✕</button>
+        </div>
+      )}
 
       {/* Filtros */}
       <div className="card-soft flex flex-wrap items-end gap-3 rounded-lg bg-card p-4">

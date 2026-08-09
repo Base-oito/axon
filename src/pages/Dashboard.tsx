@@ -176,6 +176,7 @@ export default function Dashboard() {
 
    const [docTotals, setDocTotals] = useState({ valor: 0, icms: 0, pis: 0, cofins: 0, ipi: 0, frete: 0, prod: 0 })
   const [excelLoading, setExcelLoading] = useState(false)
+  const [reportMsg, setReportMsg] = useState('')
   const displayDocs = sortDocs(docs, sortKey, sortDir)
 
   useEffect(() => { if (tab === 'documentos') { setDocPage(0); loadDocs(0) } }, [tab, docType, docMov, docCli, docFrom, docTo, showEvents])
@@ -191,59 +192,31 @@ export default function Dashboard() {
     })
   }
 
-  const downloadPdfReport = async () => {
+  const enqueueReport = async (tipo: string) => {
     const t = getToken(); if (!t) return
-    const body: any = { doc_type: docType === 'todas' ? 'both' : docType === 'nfse' ? 'nfse' : 'merchandise' }
+    const body: any = { tipo, doc_type: docType === 'todas' ? 'both' : docType === 'nfse' ? 'nfse' : 'merchandise' }
     if (docMov) body.movement = docMov
     if (docCli) body.cliente_id = docCli
     if (docFrom) body.issued_from = docFrom
     if (docTo) body.issued_to = docTo
     if (showEvents) body.show_events = true
     try {
-      const r = await fetch('/api/relatorios/pdf', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + t }, body: JSON.stringify(body) })
-      const blob = await r.blob()
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a'); a.href = url; a.download = 'relatorio-fiscal.pdf'; a.click()
-      URL.revokeObjectURL(url)
-    } catch { alert('Erro ao gerar relatório') }
+      const r = await fetch('/api/relatorios', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + t }, body: JSON.stringify(body) })
+      const d = await r.json()
+      if (!r.ok) throw new Error(d.detail || 'HTTP ' + r.status)
+      setReportMsg('Relatório em segundo plano — você pode continuar navegando. Quando estiver pronto, você receberá uma notificação com o download.')
+    } catch (e: any) { alert('Erro ao gerar relatório: ' + (e?.message || '')) }
   }
 
+  const downloadPdfReport = () => enqueueReport('pdf')
+
   const downloadExcelReport = async () => {
-    const t = getToken(); if (!t) return
     setExcelLoading(true)
-    const body: any = { doc_type: docType === 'todas' ? 'both' : docType === 'nfse' ? 'nfse' : 'merchandise' }
-    if (docMov) body.movement = docMov
-    if (docCli) body.cliente_id = docCli
-    if (docFrom) body.issued_from = docFrom
-    if (docTo) body.issued_to = docTo
-    if (showEvents) body.show_events = true
-    try {
-      const r = await fetch('/api/relatorios/excel', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + t }, body: JSON.stringify(body) })
-      if (!r.ok) throw new Error('HTTP ' + r.status)
-      const blob = await r.blob()
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a'); a.href = url; a.download = 'relatorio-fiscal.xlsx'; a.click()
-      URL.revokeObjectURL(url)
-    } catch { alert('Erro ao gerar planilha Excel') }
+    await enqueueReport('excel')
     setExcelLoading(false)
   }
 
-  const downloadXmlZip = async () => {
-    const t = getToken(); if (!t) return
-    const body: any = { doc_type: docType === 'todas' ? 'both' : docType === 'nfse' ? 'nfse' : 'merchandise' }
-    if (docMov) body.movement = docMov
-    if (docCli) body.cliente_id = docCli
-    if (docFrom) body.issued_from = docFrom
-    if (docTo) body.issued_to = docTo
-    if (showEvents) body.show_events = true
-    try {
-      const r = await fetch('/api/relatorios/xml-zip', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + t }, body: JSON.stringify(body) })
-      const blob = await r.blob()
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a'); a.href = url; a.download = 'xmls.zip'; a.click()
-      URL.revokeObjectURL(url)
-    } catch { alert('Erro ao baixar XMLs') }
-  }
+  const downloadXmlZip = () => enqueueReport('xmlzip')
 
   const tabs = [
     { key: 'performance', label: 'Performance' },
@@ -687,6 +660,13 @@ export default function Dashboard() {
                   </div>
                 </div>
               </div>
+
+              {reportMsg && (
+                <div className="mb-4 px-4 py-3 rounded-lg border border-electric-teal/40 bg-electric-teal/10 text-xs text-electric-teal flex items-start justify-between gap-4">
+                  <span>{reportMsg}</span>
+                  <button onClick={() => setReportMsg('')} className="text-pulse-ash hover:text-danger transition-colors">✕</button>
+                </div>
+              )}
 
               {/* Totals Cards */}
               {!docLoading && docs.length > 0 && (

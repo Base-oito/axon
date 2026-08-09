@@ -10,6 +10,7 @@ const NfseDashboard = lazy(() => import('@/features/dashboard/NfseDashboard'))
 const ObrigacoesDashboard = lazy(() => import('@/features/dashboard/ObrigacoesDashboard'))
 const ProcessosDashboard = lazy(() => import('@/features/dashboard/ProcessosDashboard'))
 const DocumentsPage = lazy(() => import('@/features/documentos/DocumentsPage'))
+const RelatoriosPage = lazy(() => import('@/features/documentos/RelatoriosPage'))
 const EventosPage = lazy(() => import('@/features/documentos/EventosPage'))
 const ClientesPage = lazy(() => import('@/features/clientes/ClientesPage'))
 const AgentesPage = lazy(() => import('@/features/agentes/AgentesPage'))
@@ -52,7 +53,7 @@ export default function App() {
 
           {/* Área de documentos */}
           <Route path="documentos" element={<DocumentsPage />} />
-          <Route path="documentos/relatorios" element={<PlaceholderPage title="Relatórios" description="Exportação de relatórios fiscais (Excel, PDF e XML) — em construção." />} />
+          <Route path="documentos/relatorios" element={<RelatoriosPage />} />
           <Route path="documentos/eventos" element={<EventosPage />} />
 
           {/* Demais seções do menu */}
