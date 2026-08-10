@@ -87,10 +87,23 @@ export default function RelatoriosPage() {
     }
   }
 
-  const download = (id: number) => {
+  const download = async (id: number) => {
     const t = getToken()
     if (!t) return
-    window.location.href = `/api/relatorios/${id}/download`
+    try {
+      const r = await fetch(`/api/relatorios/${id}/download`, {
+        headers: { Authorization: 'Bearer ' + t },
+        redirect: 'manual',
+      })
+      if (r.status === 307 || r.status === 302) {
+        const loc = r.headers.get('location')
+        if (loc) { window.location.href = loc; return }
+      }
+      if (r.ok) { window.location.href = `/api/relatorios/${id}/download`; return }
+      alert('Erro ao baixar relatório (' + r.status + ')')
+    } catch {
+      alert('Erro ao baixar relatório')
+    }
   }
 
   return (

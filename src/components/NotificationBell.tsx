@@ -54,6 +54,22 @@ export default function NotificationBell() {
     }
   }
 
+  const openLink = async (link: string) => {
+    if (!link.startsWith('/api/')) { window.location.href = link; return }
+    const t = getToken(); if (!t) return
+    try {
+      const r = await fetch(link, { headers: { Authorization: 'Bearer ' + t }, redirect: 'manual' })
+      if (r.status === 307 || r.status === 302) {
+        const loc = r.headers.get('location')
+        if (loc) { window.location.href = loc; return }
+      }
+      if (r.ok) { window.location.href = link; return }
+      alert('Não foi possível abrir o link (' + r.status + ')')
+    } catch {
+      alert('Não foi possível abrir o link')
+    }
+  }
+
   const formatTime = (d: string) => {
     try {
       const dt = new Date(d)
@@ -110,8 +126,8 @@ export default function NotificationBell() {
                             <div className="flex items-center gap-2 shrink-0">
                               <span className="text-[10px] text-pulse-ash">{formatTime(n.created_at)}</span>
                               {n.link && (
-                                <a href={n.link} onClick={() => setOpen(false)}
-                                  className="text-[10px] tracking-wider text-electric-teal hover:underline">Abrir</a>
+                                <button onClick={() => { setOpen(false); openLink(n.link) }}
+                                  className="text-[10px] tracking-wider text-electric-teal hover:underline">Abrir</button>
                               )}
                               <button onClick={() => dismissOne(n.id)}
                                 className="text-pulse-ash hover:text-danger text-xs" title="Descartar">✕</button>
