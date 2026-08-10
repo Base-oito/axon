@@ -93,14 +93,10 @@ export default function RelatoriosPage() {
     try {
       const r = await fetch(`/api/relatorios/${id}/download`, {
         headers: { Authorization: 'Bearer ' + t },
-        redirect: 'manual',
       })
-      if (r.status === 307 || r.status === 302) {
-        const loc = r.headers.get('location')
-        if (loc) { window.location.href = loc; return }
-      }
-      if (r.ok) { window.location.href = `/api/relatorios/${id}/download`; return }
-      alert('Erro ao baixar relatório (' + r.status + ')')
+      const d = await r.json().catch(() => null)
+      if (r.ok && d?.url) { window.location.href = d.url; return }
+      alert('Erro ao baixar relatório: ' + (r.ok ? (d?.detail || 'erro desconhecido') : 'HTTP ' + r.status))
     } catch {
       alert('Erro ao baixar relatório')
     }

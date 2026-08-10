@@ -58,13 +58,10 @@ export default function NotificationBell() {
     if (!link.startsWith('/api/')) { window.location.href = link; return }
     const t = getToken(); if (!t) return
     try {
-      const r = await fetch(link, { headers: { Authorization: 'Bearer ' + t }, redirect: 'manual' })
-      if (r.status === 307 || r.status === 302) {
-        const loc = r.headers.get('location')
-        if (loc) { window.location.href = loc; return }
-      }
-      if (r.ok) { window.location.href = link; return }
-      alert('Não foi possível abrir o link (' + r.status + ')')
+      const r = await fetch(link, { headers: { Authorization: 'Bearer ' + t } })
+      const d = await r.json().catch(() => null)
+      if (r.ok && d?.url) { window.location.href = d.url; return }
+      alert('Não foi possível abrir o link: ' + (r.ok ? (d?.detail || 'erro desconhecido') : 'HTTP ' + r.status))
     } catch {
       alert('Não foi possível abrir o link')
     }
