@@ -26,7 +26,7 @@ function fmtLastSeen(d?: string | null) {
   return `${Math.floor(h / 24)}d atrás`
 }
 
-export default function AgentesPage() {
+export default function SaudeTab() {
   const { data, isLoading, refetch } = useQuery({
     queryKey: ['agentes'],
     queryFn: () => apiFetch<Agente[]>('/api/agentes'),
@@ -40,11 +40,9 @@ export default function AgentesPage() {
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight text-foreground">Agentes</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {agentes.length} computadores · {online} online
-          </p>
+        <div className="text-sm text-muted-foreground">
+          <span className="font-semibold text-foreground">{agentes.length}</span> computadores ·{' '}
+          <span className="font-semibold text-emerald-600">{online}</span> online
         </div>
         <button
           onClick={() => refetch()}

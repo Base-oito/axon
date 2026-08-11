@@ -1,6 +1,7 @@
 import { useDashboardCompleto } from './hooks/useDashboard'
 import { ChartCard, SoftBarChart } from './components/charts'
 import { KPICard } from './components/KPICard'
+import { SortableTh, sortItems, useSortable } from '@/components/ui/sortable'
 
 function fmtDate(d?: string) {
   if (!d) return '-'
@@ -32,33 +33,50 @@ function CertTable({
         </span>
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead className="bg-muted/30">
-            <tr className="text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              <th className="px-4 py-2">Cliente</th>
-              <th className="px-3 py-2">CNPJ</th>
-              <th className="px-3 py-2">Vencimento</th>
-            </tr>
-          </thead>
-          <tbody>
-            {(items || []).map(c => (
-              <tr key={c.id} className="border-t border-border/40 transition-colors hover:bg-muted/30">
-                <td className="max-w-[260px] truncate px-4 py-2 font-medium text-foreground">{c.nome}</td>
-                <td className="px-3 py-2 font-mono text-xs text-muted-foreground">{fmtCnpj(c.cnpj)}</td>
-                <td className={`px-3 py-2 whitespace-nowrap text-xs font-medium ${
-                  badge === 'red' ? 'text-rose-600' : 'text-amber-600'
-                }`}>
-                  {fmtDate(c.certificate_expires_at)}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {(items || []).length === 0 && (
-          <div className="px-4 py-6 text-center text-xs text-muted-foreground">Nenhum certificado {badge === 'red' ? 'vencido' : 'vencendo'}.</div>
-        )}
+        <CertTableBody items={items || []} badge={badge} />
       </div>
     </div>
+  )
+}
+
+function CertTableBody({ items, badge }: {
+  items: Array<{ id: number; nome: string; cnpj?: string; certificate_expires_at?: string }>
+  badge: 'amber' | 'red'
+}) {
+  const s = useSortable('nome')
+  const sorted = sortItems(items, s.sortKey, s.sortDir, c => {
+    if (s.sortKey === 'cnpj') return c.cnpj || ''
+    if (s.sortKey === 'expires') return c.certificate_expires_at || ''
+    return c.nome || ''
+  })
+  return (
+    <>
+      <table className="w-full text-sm">
+        <thead className="bg-muted/30">
+          <tr className="text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            <SortableTh k="nome" sortKey={s.sortKey} sortDir={s.sortDir} onToggle={s.toggle}>Cliente</SortableTh>
+            <SortableTh k="cnpj" sortKey={s.sortKey} sortDir={s.sortDir} onToggle={s.toggle}>CNPJ</SortableTh>
+            <SortableTh k="expires" sortKey={s.sortKey} sortDir={s.sortDir} onToggle={s.toggle}>Vencimento</SortableTh>
+          </tr>
+        </thead>
+        <tbody>
+          {sorted.map(c => (
+            <tr key={c.id} className="border-t border-border/40 transition-colors hover:bg-muted/30">
+              <td className="max-w-[260px] truncate px-4 py-2 font-medium text-foreground">{c.nome}</td>
+              <td className="px-3 py-2 font-mono text-xs text-muted-foreground">{fmtCnpj(c.cnpj)}</td>
+              <td className={`px-3 py-2 whitespace-nowrap text-xs font-medium ${
+                badge === 'red' ? 'text-rose-600' : 'text-amber-600'
+              }`}>
+                {fmtDate(c.certificate_expires_at)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {items.length === 0 && (
+        <div className="px-4 py-6 text-center text-xs text-muted-foreground">Nenhum certificado {badge === 'red' ? 'vencido' : 'vencendo'}.</div>
+      )}
+    </>
   )
 }
 

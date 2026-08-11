@@ -51,6 +51,13 @@ function fmtMoney(v?: number) {
   return (v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 2 })
 }
 
+function fmtCnpj(v?: string) {
+  if (!v) return ''
+  const d = v.replace(/\D/g, '')
+  if (d.length !== 14) return v
+  return `${d.slice(0, 2)}.${d.slice(2, 5)}.${d.slice(5, 8)}/${d.slice(8, 12)}-${d.slice(12)}`
+}
+
 export default function DocumentsPage() {
   const [tipo, setTipo] = useState<'todas' | 'nfse' | 'mercadorias'>('todas')
   const [cliente, setCliente] = useState('')
@@ -66,8 +73,8 @@ export default function DocumentsPage() {
   const { data: clientes } = useQuery({
     queryKey: ['clientes'],
     queryFn: async () => {
-      const raw = await apiFetch<Array<{ id: number; name?: string; nome?: string }>>('/api/clientes')
-      return (raw || []).map(c => ({ id: c.id, nome: c.nome || c.name || `Cliente ${c.id}` }))
+      const raw = await apiFetch<Array<{ id: number; name?: string; nome?: string; cnpj?: string }>>('/api/clientes')
+      return (raw || []).map(c => ({ id: c.id, nome: c.nome || c.name || `Cliente ${c.id}`, cnpj: c.cnpj }))
     },
     staleTime: 10 * 60_000,
   })
@@ -206,7 +213,9 @@ export default function DocumentsPage() {
             className="h-9 min-w-[180px] rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-ring">
             <option value="">Todas</option>
             {(clientes || []).map(c => (
-              <option key={c.id} value={String(c.id)}>{c.nome}</option>
+              <option key={c.id} value={String(c.id)}>
+                {c.nome}{c.cnpj ? ` — ${fmtCnpj(c.cnpj)}` : ''}
+              </option>
             ))}
           </select>
         </div>
@@ -240,6 +249,7 @@ export default function DocumentsPage() {
               <tr>
                 <th className="py-2 pl-4 pr-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Tipo</th>
                 <HeadBtn k="status">Status</HeadBtn>
+                <th className="py-2 pr-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Movimento</th>
                 <HeadBtn k="number">Nº</HeadBtn>
                 <HeadBtn k="issued_at">Data</HeadBtn>
                 <HeadBtn k="issuer_name">Emitente</HeadBtn>
@@ -262,6 +272,19 @@ export default function DocumentsPage() {
                     )}
                   </td>
                   <td className="py-2 pr-3 text-xs text-muted-foreground">{d.status || '-'}</td>
+                  <td className="py-2 pr-3 text-xs">
+                    {d.movement_type ? (
+                      <span className={`rounded px-2 py-0.5 text-xs font-medium ${
+                        d.movement_type === 'prestados' ? 'bg-cyan-50 text-cyan-700'
+                        : d.movement_type === 'tomados' ? 'bg-emerald-50 text-emerald-700'
+                        : 'bg-muted text-muted-foreground'
+                      }`}>
+                        {d.movement_type === 'prestados' ? 'Prestado'
+                          : d.movement_type === 'tomados' ? 'Tomado'
+                          : d.movement_type}
+                      </span>
+                    ) : '-'}
+                  </td>
                   <td className="py-2 pr-3 font-mono text-xs">{d.number || '-'}</td>
                   <td className="py-2 pr-3 whitespace-nowrap text-xs text-muted-foreground">{fmtDate(d.issued_at)}</td>
                   <td className="max-w-[220px] truncate py-2 pr-3 text-xs">{d.issuer_name || '-'}</td>

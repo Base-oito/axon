@@ -29,6 +29,13 @@ function fmtDate(d?: string | null) {
   return dt.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })
 }
 
+function fmtCnpj(v?: string) {
+  if (!v) return ''
+  const d = v.replace(/\D/g, '')
+  if (d.length !== 14) return v
+  return `${d.slice(0, 2)}.${d.slice(2, 5)}.${d.slice(5, 8)}/${d.slice(8, 12)}-${d.slice(12)}`
+}
+
 export default function RelatoriosPage() {
   const queryClient = useQueryClient()
   const [tipo, setTipo] = useState<'pdf' | 'excel' | 'xmlzip'>('excel')
@@ -43,8 +50,8 @@ export default function RelatoriosPage() {
   const { data: clientes } = useQuery({
     queryKey: ['clientes'],
     queryFn: async () => {
-      const raw = await apiFetch<Array<{ id: number; name?: string; nome?: string }>>('/api/clientes')
-      return (raw || []).map(c => ({ id: c.id, nome: c.nome || c.name || `Cliente ${c.id}` }))
+      const raw = await apiFetch<Array<{ id: number; name?: string; nome?: string; cnpj?: string }>>('/api/clientes')
+      return (raw || []).map(c => ({ id: c.id, nome: c.nome || c.name || `Cliente ${c.id}`, cnpj: c.cnpj }))
     },
     staleTime: 10 * 60_000,
   })
@@ -138,7 +145,9 @@ export default function RelatoriosPage() {
               className="h-9 min-w-[180px] rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-ring">
               <option value="">Todas</option>
               {(clientes || []).map(c => (
-                <option key={c.id} value={String(c.id)}>{c.nome}</option>
+                <option key={c.id} value={String(c.id)}>
+                  {c.nome}{c.cnpj ? ` — ${fmtCnpj(c.cnpj)}` : ''}
+                </option>
               ))}
             </select>
           </div>

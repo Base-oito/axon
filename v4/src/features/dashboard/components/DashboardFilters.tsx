@@ -6,6 +6,13 @@ interface FilterBarProps {
   onChange: (f: DashboardFilters) => void
 }
 
+function fmtCnpj(v?: string) {
+  if (!v) return ''
+  const d = v.replace(/\D/g, '')
+  if (d.length !== 14) return v
+  return `${d.slice(0, 2)}.${d.slice(2, 5)}.${d.slice(5, 8)}/${d.slice(8, 12)}-${d.slice(12)}`
+}
+
 export function DashboardFilters({ filters, onChange }: FilterBarProps) {
   const { data: clientes } = useClientes()
 
@@ -20,7 +27,9 @@ export function DashboardFilters({ filters, onChange }: FilterBarProps) {
         >
           <option value="">Todas as empresas</option>
           {(clientes || []).map(c => (
-            <option key={c.id} value={String(c.id)}>{c.nome}</option>
+            <option key={c.id} value={String(c.id)}>
+              {c.nome}{c.cnpj ? ` — ${fmtCnpj(c.cnpj)}` : ''}
+            </option>
           ))}
         </select>
       </div>

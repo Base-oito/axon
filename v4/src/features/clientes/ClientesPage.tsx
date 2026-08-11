@@ -1,17 +1,26 @@
 import { useState } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiFetch, getToken } from '@/lib/api'
-import { Search, Users, Pencil, X, Save, Upload, Plus, Trash2, Phone, Mail } from 'lucide-react'
+import { Search, Users, Pencil, X, Plus, Trash2, Phone, Mail, Loader2, Upload } from 'lucide-react'
 
-interface ClienteRaw {
+interface ClienteList {
+  id: number
+  name?: string
+  nome?: string
+  cnpj?: string
+  ativo?: boolean
+  active?: boolean
+  certificate_expires_at?: string
+  departamento?: string
+}
+
+interface ClienteDetail {
   id: number
   name?: string
   nome?: string
   cnpj?: string
   active?: boolean
   ativo?: boolean
-  certificate_expires_at?: string
-  departamento?: string
   nome_fantasia?: string
   regime?: string
   telefone?: string
@@ -24,7 +33,8 @@ interface ClienteRaw {
   endereco_cidade?: string
   endereco_uf?: string
   observacoes?: string
-  certificate_path?: string
+  certificate_expires_at?: string
+  responsaveis?: Responsavel[]
 }
 
 interface Contato {
@@ -32,6 +42,36 @@ interface Contato {
   nome: string
   email: string
   telefone: string
+  whatsapp?: number
+  _temp?: boolean
+  _deleted?: boolean
+  _notify?: boolean
+  _exclude?: number[]
+}
+
+interface Responsavel {
+  id: number
+  user_id: number
+  user_name: string
+  department_id: number
+  department_name: string
+}
+
+interface Departamento {
+  id: number
+  nome: string
+}
+
+interface Usuario {
+  id: number
+  display_name: string
+  departamento_id: number | null
+}
+
+interface Cnae {
+  codigo: string
+  descricao: string
+  principal: number
 }
 
 function fmtCnpj(cnpj?: string) {
@@ -55,22 +95,59 @@ function fmtPhone(t?: string) {
   return t
 }
 
+function fmtCNPJInput(v: string) {
+  const c = (v || '').replace(/\D/g, '').slice(0, 14)
+  return c
+    .replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5')
+    .replace(/^(\d{2})(\d{3})(\d{3})(\d{4})$/, '$1.$2.$3/$4-')
+    .replace(/^(\d{2})(\d{3})(\d{3})$/, '$1.$2.$3/')
+    .replace(/^(\d{2})(\d{3})$/, '$1.$2.')
+    .replace(/^(\d{2})$/, '$1.')
+}
+
 const REGIMES = ['Simples Nacional', 'Lucro Presumido', 'Lucro Real', 'MEI', 'Isento']
+
+const SHEET_TABS = [
+  { key: 'geral', label: 'Geral' },
+  { key: 'endereco', label: 'Endereço' },
+  { key: 'contatos', label: 'Contatos' },
+  { key: 'responsaveis', label: 'Responsáveis' },
+]
+
+const MODAL_TABS = [
+  { key: 'empresa', label: 'Empresa' },
+  { key: 'contatos', label: 'Contatos' },
+  { key: 'particularidades', label: 'Particularidades' },
+  { key: 'cnaes', label: 'CNAEs' },
+  { key: 'responsaveis', label: 'Responsáveis' },
+]
 
 export default function ClientesPage() {
   const qc = useQueryClient()
   const [q, setQ] = useState('')
   const [selectedId, setSelectedId] = useState<number | null>(null)
-  const [editing, setEditing] = useState(false)
-  const [form, setForm] = useState<any>({})
+  const [sheetTab, setSheetTab] = useState('geral')
+
+  const [showModal, setShowModal] = useState(false)
+  const [editingId, setEditingId] = useState<number | null>(null)
+  const [modalTab, setModalTab] = useState('empresa')
+  const [form, setForm] = useState<Record<string, any>>({})
+  const [cnaes, setCnaes] = useState<Cnae[]>([])
   const [contatos, setContatos] = useState<Contato[]>([])
-  const [certFile, setCertFile] = useState<File | null>(null)
-  const [certPass, setCertPass] = useState('')
+  const [cnpjLoading, setCnpjLoading] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [formMsg, setFormMsg] = useState('')
+
+  const [assigning, setAssigning] = useState(false)
+  const [assignDeptId, setAssignDeptId] = useState('')
+  const [assignUserId, setAssignUserId] = useState('')
+  const [changingRespId, setChangingRespId] = useState<number | null>(null)
+  const [changeUserId, setChangeUserId] = useState('')
 
   const { data: clientes } = useQuery({
     queryKey: ['clientes'],
     queryFn: async () => {
-      const raw = await apiFetch<ClienteRaw[]>('/api/clientes')
+      const raw = await apiFetch<ClienteList[]>('/api/clientes')
       return (raw || []).map(c => ({
         id: c.id,
         nome: c.nome || c.name || `Cliente ${c.id}`,
@@ -85,107 +162,270 @@ export default function ClientesPage() {
 
   const { data: detail, refetch: refetchDetail } = useQuery({
     queryKey: ['cliente', selectedId],
-    queryFn: () => apiFetch<ClienteRaw>(`/api/clientes/${selectedId}`),
+    queryFn: () => apiFetch<ClienteDetail>(`/api/clientes/${selectedId}`),
     enabled: !!selectedId,
   })
 
-  const { data: contatosData } = useQuery({
+  const { data: contatosData, refetch: refetchContatos } = useQuery({
     queryKey: ['cliente-contatos', selectedId],
     queryFn: () => apiFetch<Contato[]>(`/api/clientes/${selectedId}/contatos`),
     enabled: !!selectedId,
   })
 
-  const salvar = useMutation({
-    mutationFn: async () => {
-      const t = getToken()
-      const r = await fetch(`/api/clientes/${selectedId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + t },
-        body: JSON.stringify({
-          name: form.name, cnpj: form.cnpj, nome_fantasia: form.nome_fantasia,
-          regime: form.regime, telefone: form.telefone, email: form.email,
-          endereco_cep: form.endereco_cep, endereco_logradouro: form.endereco_logradouro,
-          endereco_numero: form.endereco_numero, endereco_complemento: form.endereco_complemento,
-          endereco_bairro: form.endereco_bairro, endereco_cidade: form.endereco_cidade,
-          endereco_uf: form.endereco_uf, observacoes: form.observacoes || '',
-        }),
-      })
-      if (!r.ok) throw new Error('HTTP ' + r.status)
-      return r.json()
-    },
-    onSuccess: () => {
-      setEditing(false)
-      qc.invalidateQueries({ queryKey: ['clientes'] })
-      refetchDetail()
-    },
-    onError: () => alert('Erro ao salvar cliente'),
+  const { data: departments } = useQuery({
+    queryKey: ['departamentos'],
+    queryFn: () => apiFetch<Departamento[]>('/api/departamentos'),
+    staleTime: 5 * 60_000,
   })
 
-  const enviarCertificado = useMutation({
-    mutationFn: async () => {
-      if (!certFile || !certPass) throw new Error('Selecione arquivo e senha')
-      const t = getToken()
-      const fd = new FormData()
-      fd.append('certificate_file', certFile)
-      fd.append('certificate_password', certPass)
-      fd.append('client_id', String(selectedId))
-      const r = await fetch('/api/upload/certificate', { method: 'POST', headers: { Authorization: 'Bearer ' + t }, body: fd })
-      if (!r.ok) {
-        const e = await r.json().catch(() => ({}))
-        throw new Error(e.detail || 'Erro ao enviar certificado')
-      }
-      return r.json()
-    },
-    onSuccess: () => {
-      setCertFile(null)
-      setCertPass('')
-      alert('Certificado enviado com sucesso!')
-      refetchDetail()
-      qc.invalidateQueries({ queryKey: ['clientes'] })
-    },
-    onError: (e: any) => alert(e.message || 'Erro ao enviar certificado'),
+  const { data: users } = useQuery({
+    queryKey: ['usuarios'],
+    queryFn: () => apiFetch<Usuario[]>('/api/usuarios?limit=500'),
+    staleTime: 5 * 60_000,
   })
 
-  const adicionarContato = () => setContatos(prev => [...prev, { nome: '', email: '', telefone: '' }] as any)
-  const removerContato = (idx: number) => setContatos(prev => prev.filter((_, i) => i !== idx))
-
-  const salvarContatos = async () => {
-    const t = getToken()
-    try {
-      for (const ct of contatos) {
-        const method = ct.id ? 'PUT' : 'POST'
-        const url = ct.id ? `/api/clientes/${selectedId}/contatos/${ct.id}` : `/api/clientes/${selectedId}/contatos`
-        await fetch(url, { method, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + t }, body: JSON.stringify({ nome: ct.nome, email: ct.email, telefone: ct.telefone }) })
-      }
-      alert('Contatos salvos!')
-      qc.invalidateQueries({ queryKey: ['cliente-contatos', selectedId] })
-    } catch { alert('Erro ao salvar contatos') }
+  const openDetail = (id: number) => {
+    setSelectedId(id)
+    setSheetTab('geral')
+    setChangingRespId(null)
+    setAssigning(false)
   }
 
-  const openDetail = (c: any) => {
-    setSelectedId(c.id)
-    setEditing(false)
+  const openNew = () => {
+    setForm({})
+    setCnaes([])
     setContatos([])
+    setFormMsg('')
+    setEditingId(null)
+    setModalTab('empresa')
+    setShowModal(true)
   }
 
-  const startEdit = () => {
-    if (!detail) return
+  const openEdit = async () => {
+    if (!selectedId) return
+    const d = await apiFetch<ClienteDetail>(`/api/clientes/${selectedId}`).catch(() => null)
+    if (!d) { alert('Erro ao carregar dados do cliente'); return }
     setForm({
-      name: detail.name || detail.nome, cnpj: detail.cnpj, nome_fantasia: detail.nome_fantasia,
-      regime: detail.regime, telefone: detail.telefone, email: detail.email,
-      endereco_cep: detail.endereco_cep, endereco_logradouro: detail.endereco_logradouro,
-      endereco_numero: detail.endereco_numero, endereco_complemento: detail.endereco_complemento,
-      endereco_bairro: detail.endereco_bairro, endereco_cidade: detail.endereco_cidade,
-      endereco_uf: detail.endereco_uf, observacoes: detail.observacoes,
+      name: d.name || d.nome || '',
+      cnpj: d.cnpj || '',
+      nome_fantasia: d.nome_fantasia || '',
+      regime: d.regime || '',
+      telefone: d.telefone || '',
+      email: d.email || '',
+      endereco_cep: d.endereco_cep || '',
+      endereco_logradouro: d.endereco_logradouro || '',
+      endereco_numero: d.endereco_numero || '',
+      endereco_complemento: d.endereco_complemento || '',
+      endereco_bairro: d.endereco_bairro || '',
+      endereco_cidade: d.endereco_cidade || '',
+      endereco_uf: d.endereco_uf || '',
+      observacoes: d.observacoes || '',
     })
-    setContatos((contatosData || []).map(c => ({ id: c.id, nome: c.nome, email: c.email, telefone: c.telefone })))
-    setEditing(true)
+    setCnaes([])
+    setContatos([])
+    setFormMsg('')
+    try {
+      const cts = await apiFetch<Contato[]>('/api/clientes/' + selectedId + '/contatos')
+      for (const ct of cts) {
+        ct._notify = true
+        ct._exclude = []
+        try {
+          const p = await apiFetch<{ all_depts?: boolean; exclude?: number[] }>(`/api/mail/contatos/${ct.id}/permissoes`)
+          ct._notify = p.all_depts ?? true
+          ct._exclude = p.exclude || []
+        } catch { /* mantém padrão */ }
+      }
+      setContatos(cts || [])
+    } catch { setContatos([]) }
+    setEditingId(selectedId)
+    setModalTab('empresa')
+    setShowModal(true)
+  }
+
+  const updateForm = (field: string, value: string) => setForm(p => ({ ...p, [field]: value }))
+
+  const cnpjLookup = async () => {
+    const cnpj = (form.cnpj || '').replace(/\D/g, '')
+    if (cnpj.length !== 14) { alert('Informe um CNPJ válido com 14 dígitos'); return }
+    setCnpjLoading(true)
+    try {
+      const d = await apiFetch<any>(`/api/buscar-cnpj/${cnpj}`)
+      const rawRegime = (d.regime || '').toLowerCase()
+      const matched = REGIMES.find(r => r.toLowerCase() === rawRegime) || ''
+      setForm(p => ({
+        ...p,
+        name: d.nome || d.razao_social || p.name || '',
+        nome_fantasia: d.nome_fantasia || p.nome_fantasia || '',
+        regime: matched,
+        endereco_cep: d.cep || p.endereco_cep || '',
+        endereco_logradouro: d.logradouro || p.endereco_logradouro || '',
+        endereco_numero: d.numero || p.endereco_numero || '',
+        endereco_complemento: d.complemento || p.endereco_complemento || '',
+        endereco_bairro: d.bairro || p.endereco_bairro || '',
+        endereco_cidade: d.municipio || p.endereco_cidade || '',
+        endereco_uf: d.uf || p.endereco_uf || '',
+        telefone: d.telefone || p.telefone || '',
+        email: d.email || p.email || '',
+      }))
+      setCnaes(d.cnaes || [])
+    } catch {
+      alert('CNPJ não encontrado ou erro na consulta')
+    }
+    setCnpjLoading(false)
+  }
+
+  const saveContatos = async (clientId: number) => {
+    const t = getToken()
+    if (!t) return
+    const depts = departments || []
+    for (const ct of contatos) {
+      if (ct._deleted) {
+        if (ct.id && !ct._temp) {
+          await fetch(`/api/clientes/${clientId}/contatos/${ct.id}`, { method: 'DELETE', headers: { Authorization: 'Bearer ' + t } })
+        }
+        continue
+      }
+      const payload = JSON.stringify({ nome: ct.nome, email: ct.email, telefone: ct.telefone, whatsapp: ct.whatsapp ? 1 : 0 })
+      let cid: number | undefined = ct.id
+      if (ct._temp) {
+        const r = await fetch(`/api/clientes/${clientId}/contatos`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + t }, body: payload })
+        const dd = await r.json().catch(() => ({}))
+        cid = dd.id
+      } else if (cid) {
+        await fetch(`/api/clientes/${clientId}/contatos/${cid}`, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + t }, body: payload })
+      }
+      if (cid) {
+        await fetch(`/api/mail/contatos/${cid}/permissoes`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + t },
+          body: JSON.stringify({
+            all_depts: !!ct._notify,
+            exclude: ct._notify ? (ct._exclude || []) : depts.map(dd => dd.id),
+          }),
+        })
+      }
+    }
+  }
+
+  const handleSave = async () => {
+    const t = getToken()
+    if (!t) return
+    if (!form.name?.trim()) { alert('Nome/Razão Social é obrigatório'); return }
+    setSaving(true)
+    try {
+      const body = {
+        name: form.name,
+        cnpj: form.cnpj,
+        nome_fantasia: form.nome_fantasia || '',
+        regime: form.regime || '',
+        telefone: form.telefone || '',
+        email: form.email || '',
+        endereco_cep: form.endereco_cep || '',
+        endereco_logradouro: form.endereco_logradouro || '',
+        endereco_numero: form.endereco_numero || '',
+        endereco_complemento: form.endereco_complemento || '',
+        endereco_bairro: form.endereco_bairro || '',
+        endereco_cidade: form.endereco_cidade || '',
+        endereco_uf: form.endereco_uf || '',
+        observacoes: form.observacoes || '',
+      }
+      let clientId: number
+      if (editingId) {
+        const r = await fetch(`/api/clientes/${editingId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + t }, body: JSON.stringify(body) })
+        if (!r.ok) throw new Error('HTTP ' + r.status)
+        clientId = editingId
+      } else {
+        const r = await fetch('/api/clientes', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + t }, body: JSON.stringify(body) })
+        const dd = await r.json().catch(() => ({}))
+        if (!r.ok) throw new Error(dd.detail || 'HTTP ' + r.status)
+        clientId = dd.id
+      }
+      await saveContatos(clientId)
+      setShowModal(false)
+      qc.invalidateQueries({ queryKey: ['clientes'] })
+      if (editingId) {
+        refetchDetail()
+        refetchContatos()
+      }
+      setFormMsg('')
+    } catch (e: unknown) {
+      setFormMsg('Erro ao salvar cliente: ' + (e instanceof Error ? e.message : 'tente novamente'))
+    }
+    setSaving(false)
+  }
+
+  const toggleActive = async (id: number, active: boolean) => {
+    const t = getToken()
+    if (!t) return
+    try {
+      await fetch(`/api/clientes/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + t }, body: JSON.stringify({ active }) })
+      qc.invalidateQueries({ queryKey: ['clientes'] })
+      refetchDetail()
+    } catch { alert('Erro ao alterar status') }
+  }
+
+  const handleDelete = async (id: number) => {
+    if (!confirm('EXCLUIR PERMANENTEMENTE? Esta ação não pode ser desfeita!')) return
+    const t = getToken()
+    if (!t) return
+    try {
+      await fetch(`/api/clientes/${id}?permanente=true`, { method: 'DELETE', headers: { Authorization: 'Bearer ' + t } })
+      setSelectedId(null)
+      qc.invalidateQueries({ queryKey: ['clientes'] })
+    } catch { alert('Erro ao excluir cliente') }
+  }
+
+  const assignResponsavel = async () => {
+    if (!assignDeptId || !assignUserId || !selectedId) return
+    const t = getToken()
+    if (!t) return
+    try {
+      await fetch(`/api/clientes/${selectedId}/responsaveis`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + t },
+        body: JSON.stringify({ user_id: parseInt(assignUserId), department_id: parseInt(assignDeptId) }),
+      })
+      setAssigning(false)
+      setAssignDeptId('')
+      setAssignUserId('')
+      refetchDetail()
+    } catch { alert('Erro ao atribuir responsável') }
+  }
+
+  const changeResponsavel = async (respId: number) => {
+    if (!changeUserId || !selectedId) return
+    const t = getToken()
+    if (!t) return
+    try {
+      await fetch(`/api/clientes/${selectedId}/responsaveis/${respId}/remover`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + t },
+        body: JSON.stringify({ new_user_id: parseInt(changeUserId) }),
+      })
+      setChangingRespId(null)
+      setChangeUserId('')
+      refetchDetail()
+    } catch { alert('Erro ao alterar responsável') }
+  }
+
+  const removeResponsavel = async (r: Responsavel) => {
+    if (!confirm('Remover ' + r.user_name + ' de ' + r.department_name + '?')) return
+    const t = getToken()
+    if (!t || !selectedId) return
+    try {
+      await fetch(`/api/clientes/${selectedId}/responsaveis/${r.id}/remover`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + t },
+        body: JSON.stringify({}),
+      })
+      refetchDetail()
+    } catch { alert('Erro ao remover responsável') }
   }
 
   const filtered = (clientes || []).filter(c =>
-    !q || c.nome.toLowerCase().includes(q.toLowerCase()) || (c.cnpj || '').includes(q))
+    !q || c.nome.toLowerCase().includes(q.toLowerCase()) || (c.cnpj || '').includes(q.replace(/\D/g, '')))
 
-  const F = ({ label, value }: { label: string; value?: string }) => (
+  const F = ({ label, value }: { label: string; value?: string | null }) => (
     <div>
       <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{label}</p>
       <p className="mt-0.5 text-sm text-foreground">{value || '-'}</p>
@@ -196,13 +436,14 @@ export default function ClientesPage() {
     <div>
       <label className="mb-1 block text-xs font-medium text-muted-foreground">{label}</label>
       <input type={type || 'text'} value={form[field] || ''} placeholder={placeholder}
-        onChange={e => setForm((p: any) => ({ ...p, [field]: e.target.value }))}
+        onChange={e => updateForm(field, e.target.value)}
         className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
     </div>
   )
 
-  return (
-    <div className="flex h-full min-h-[calc(100vh-7rem)] gap-4">
+  const selectCls = 'h-9 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring'
+
+  return (<div className="flex h-full min-h-[calc(100vh-7rem)] gap-4">
       {/* ── Lista ── */}
       <div className="flex min-w-0 flex-1 flex-col gap-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -213,7 +454,7 @@ export default function ClientesPage() {
             </p>
           </div>
           <button
-            onClick={() => alert('Cadastro de novo cliente — em breve.')}
+            onClick={openNew}
             className="inline-flex items-center gap-2 rounded-lg bg-primary px-3.5 py-2 text-xs font-medium text-primary-foreground shadow-md shadow-primary/30 transition-colors hover:bg-primary/90">
             <Plus className="h-4 w-4" />
             Novo cliente
@@ -223,6 +464,7 @@ export default function ClientesPage() {
         <div className="card-soft flex items-center gap-2 rounded-lg bg-card px-4 py-3">
           <Search className="h-4 w-4 text-muted-foreground" />
           <input value={q} onChange={e => setQ(e.target.value)} placeholder="Buscar por nome ou CNPJ…"
+            name="busca-clientes" autoComplete="off"
             className="w-full bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none" />
         </div>
 
@@ -234,7 +476,7 @@ export default function ClientesPage() {
           ) : (
             <div className="grid gap-px bg-border/40 sm:grid-cols-2 lg:grid-cols-3">
               {filtered.map(c => (
-                <button key={c.id} onClick={() => openDetail(c)}
+                <button key={c.id} onClick={() => openDetail(c.id)}
                   className={`group flex items-center gap-3 bg-card p-4 text-left transition-colors hover:bg-muted/40 ${selectedId === c.id ? 'bg-[#0078d4]/5' : ''}`}>
                   <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[#0078d4]/10">
                     <Users className="h-5 w-5 text-[#0078d4]" />
@@ -260,16 +502,14 @@ export default function ClientesPage() {
 
       {/* ── Painel lateral ── */}
       {selectedId && (
-        <div className="card-soft flex w-[380px] shrink-0 flex-col overflow-hidden rounded-lg bg-card">
+        <div className="card-soft flex w-[400px] shrink-0 flex-col overflow-hidden rounded-lg bg-card">
           <div className="flex items-center justify-between border-b border-border/60 px-4 py-3">
-            <h3 className="text-sm font-semibold text-foreground">Cliente</h3>
+            <h3 className="truncate text-sm font-semibold text-foreground">{detail?.name || detail?.nome || 'Cliente'}</h3>
             <div className="flex items-center gap-1">
-              {!editing && (
-                <button onClick={startEdit} title="Editar"
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
-                  <Pencil className="h-4 w-4" />
-                </button>
-              )}
+              <button onClick={openEdit} title="Editar"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+                <Pencil className="h-4 w-4" />
+              </button>
               <button onClick={() => setSelectedId(null)} title="Fechar"
                 className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
                 <X className="h-4 w-4" />
@@ -277,152 +517,479 @@ export default function ClientesPage() {
             </div>
           </div>
 
+          <div className="flex shrink-0 border-b border-border/60">
+            {SHEET_TABS.map(t => (
+              <button key={t.key} onClick={() => setSheetTab(t.key)}
+                className={`flex-1 border-b-2 px-2 py-2.5 text-xs font-medium transition-colors ${sheetTab === t.key ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'}`}>
+                {t.label}
+              </button>
+            ))}
+          </div>
+
           <div className="flex-1 space-y-5 overflow-y-auto p-4">
-            {!editing ? (
+            {sheetTab === 'geral' && (
               <>
-                {/* Cabeçalho */}
                 <div className="text-center">
                   <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-[#0078d4]/10 text-xl font-bold text-[#0078d4]">
                     {(detail?.name || detail?.nome || '?')[0]?.toUpperCase()}
                   </div>
                   <h4 className="mt-2 text-base font-semibold text-foreground">{detail?.name || detail?.nome}</h4>
                   {detail?.nome_fantasia && <p className="text-xs text-muted-foreground">{detail.nome_fantasia}</p>}
+                  <span className={`mt-2 inline-block rounded-full px-2 py-0.5 text-[10px] font-medium ${detail?.active ?? detail?.ativo ? 'bg-emerald-50 text-emerald-700' : 'bg-muted text-muted-foreground'}`}>
+                    {(detail?.active ?? detail?.ativo) ? 'Ativo' : 'Inativo'}
+                  </span>
                 </div>
 
-                {/* Geral */}
                 <div className="space-y-2.5 rounded-lg border border-border/60 bg-muted/20 p-3">
                   <F label="CNPJ" value={fmtCnpj(detail?.cnpj)} />
                   <F label="Regime Tributário" value={detail?.regime} />
                   <F label="Telefone" value={fmtPhone(detail?.telefone)} />
                   <F label="E-mail" value={detail?.email} />
-                  <F label="Status" value={detail?.ativo ? 'Ativo' : 'Inativo'} />
                   <F label="Certificado vence em" value={fmtDate(detail?.certificate_expires_at)} />
+                  {detail?.observacoes && (
+                    <div className="rounded-lg border border-amber-500/30 bg-amber-50 p-2.5">
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-amber-700">Particularidades</p>
+                      <p className="mt-0.5 whitespace-pre-wrap text-xs text-amber-800">{detail.observacoes}</p>
+                    </div>
+                  )}
                 </div>
 
-                {/* Endereço */}
-                <div className="space-y-2.5 rounded-lg border border-border/60 bg-muted/20 p-3">
-                  <F label="CEP" value={detail?.endereco_cep} />
-                  <F label="Logradouro" value={detail?.endereco_logradouro} />
-                  <F label="Número" value={detail?.endereco_numero} />
-                  <F label="Complemento" value={detail?.endereco_complemento} />
-                  <F label="Bairro" value={detail?.endereco_bairro} />
-                  <F label="Cidade / UF" value={detail?.endereco_cidade ? `${detail.endereco_cidade}${detail.endereco_uf ? ' / ' + detail.endereco_uf : ''}` : detail?.endereco_uf} />
-                </div>
-
-                {/* Contatos */}
-                <div>
-                  <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Contatos</p>
-                  <div className="space-y-1.5">
-                    {(contatosData || []).length === 0 && <p className="text-xs text-muted-foreground">Nenhum contato cadastrado.</p>}
-                    {(contatosData || []).map(ct => (
-                      <div key={ct.id || ct.email} className="rounded-lg border border-border/60 bg-muted/20 p-2.5">
-                        <p className="text-sm font-medium text-foreground">{ct.nome || '-'}</p>
-                        {ct.email && <p className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground"><Mail className="h-3 w-3" />{ct.email}</p>}
-                        {ct.telefone && <p className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground"><Phone className="h-3 w-3" />{fmtPhone(ct.telefone)}</p>}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Certificado */}
-                <div>
-                  <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Certificado digital</p>
-                  <div className="space-y-2 rounded-lg border border-border/60 bg-muted/20 p-3">
-                    <input type="file" accept=".pfx,.p12" onChange={e => setCertFile(e.target.files?.[0] || null)}
-                      className="w-full text-xs text-foreground file:mr-2 file:rounded-md file:border-0 file:bg-[#0078d4]/10 file:px-2.5 file:py-1 file:text-xs file:font-medium file:text-[#0078d4]" />
-                    <input type="password" value={certPass} onChange={e => setCertPass(e.target.value)}
-                      placeholder="Senha do certificado"
-                      className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
-                    <button onClick={() => enviarCertificado.mutate()} disabled={!certFile || !certPass || enviarCertificado.isPending}
-                      className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-3 py-2 text-xs font-medium text-primary-foreground shadow-md shadow-primary/30 transition-colors hover:bg-primary/90 disabled:opacity-40">
-                      <Upload className="h-4 w-4" />
-                      {enviarCertificado.isPending ? 'Enviando…' : 'Enviar certificado'}
+                <div className="flex flex-col gap-2">
+                  <div className="flex gap-2">
+                    <button onClick={() => toggleActive(detail!.id, !(detail?.active ?? detail?.ativo ?? true))}
+                      className="inline-flex flex-1 items-center justify-center rounded-lg border border-border px-3 py-2 text-xs font-medium text-foreground transition-colors hover:bg-muted">
+                      {(detail?.active ?? detail?.ativo) ? 'Inativar' : 'Ativar'}
+                    </button>
+                    <button onClick={() => handleDelete(detail!.id)}
+                      className="rounded-lg border border-rose-300 px-3 py-2 text-xs font-medium text-rose-600 transition-colors hover:bg-rose-50">
+                      Excluir
                     </button>
                   </div>
-                </div>
-              </>
-            ) : (
-              <>
-                {/* Formulário de edição */}
-                <div className="space-y-3">
-                  <Inp label="Razão Social" field="name" />
-                  <Inp label="Nome Fantasia" field="nome_fantasia" />
-                  <Inp label="CNPJ" field="cnpj" />
-                  <div>
-                    <label className="mb-1 block text-xs font-medium text-muted-foreground">Regime Tributário</label>
-                    <select value={form.regime || ''} onChange={e => setForm((p: any) => ({ ...p, regime: e.target.value }))}
-                      className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-ring">
-                      <option value="">Selecione…</option>
-                      {REGIMES.map(r => <option key={r} value={r}>{r}</option>)}
-                    </select>
-                  </div>
-                  <Inp label="Telefone" field="telefone" placeholder="(00) 00000-0000" />
-                  <Inp label="E-mail" field="email" type="email" />
-                  <div className="grid grid-cols-2 gap-2">
-                    <Inp label="CEP" field="endereco_cep" />
-                    <Inp label="UF" field="endereco_uf" />
-                  </div>
-                  <Inp label="Logradouro" field="endereco_logradouro" />
-                  <div className="grid grid-cols-2 gap-2">
-                    <Inp label="Número" field="endereco_numero" />
-                    <Inp label="Complemento" field="endereco_complemento" />
-                  </div>
-                  <Inp label="Bairro" field="endereco_bairro" />
-                  <Inp label="Cidade" field="endereco_cidade" />
-                  <div>
-                    <label className="mb-1 block text-xs font-medium text-muted-foreground">Observações</label>
-                    <textarea value={form.observacoes || ''} onChange={e => setForm((p: any) => ({ ...p, observacoes: e.target.value }))} rows={3}
-                      className="w-full resize-none rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring" />
-                  </div>
+                  <button onClick={openEdit}
+                    className="inline-flex items-center justify-center gap-2 rounded-lg bg-primary px-3 py-2 text-xs font-medium text-primary-foreground shadow-md shadow-primary/30 transition-colors hover:bg-primary/90">
+                    <Pencil className="h-3.5 w-3.5" />
+                    Editar cliente
+                  </button>
                 </div>
 
-                {/* Contatos (edição) */}
-                <div>
-                  <div className="mb-2 flex items-center justify-between">
-                    <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Contatos</p>
-                    <button onClick={adicionarContato} className="text-xs font-medium text-[#0078d4] hover:underline">+ Adicionar</button>
-                  </div>
-                  <div className="space-y-2">
-                    {contatos.map((ct, i) => (
-                      <div key={i} className="space-y-1.5 rounded-lg border border-border/60 bg-muted/20 p-2.5">
-                        <input value={ct.nome} onChange={e => { const n = [...contatos]; n[i].nome = e.target.value; setContatos(n) }} placeholder="Nome"
-                          className="h-8 w-full rounded-md border border-input bg-background px-2.5 text-xs focus:outline-none focus:ring-1 focus:ring-ring" />
-                        <input value={ct.email} onChange={e => { const n = [...contatos]; n[i].email = e.target.value; setContatos(n) }} placeholder="E-mail"
-                          className="h-8 w-full rounded-md border border-input bg-background px-2.5 text-xs focus:outline-none focus:ring-1 focus:ring-ring" />
-                        <div className="flex items-center gap-1.5">
-                          <input value={ct.telefone} onChange={e => { const n = [...contatos]; n[i].telefone = e.target.value; setContatos(n) }} placeholder="Telefone"
-                            className="h-8 w-full rounded-md border border-input bg-background px-2.5 text-xs focus:outline-none focus:ring-1 focus:ring-ring" />
-                          <button onClick={() => removerContato(i)} className="rounded p-1.5 text-muted-foreground hover:bg-rose-50 hover:text-rose-600">
+                <div className="space-y-2 rounded-lg border border-border/60 bg-muted/20 p-3">
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Certificado digital</p>
+                  <CertificadoForm clienteId={detail?.id} />
+                </div>
+              </>
+            )}
+
+            {sheetTab === 'endereco' && (
+              <div className="space-y-2.5 rounded-lg border border-border/60 bg-muted/20 p-3">
+                <div className="grid grid-cols-2 gap-2.5">
+                  <F label="CEP" value={detail?.endereco_cep} />
+                  <F label="UF" value={detail?.endereco_uf} />
+                </div>
+                <F label="Logradouro" value={detail?.endereco_logradouro} />
+                <div className="grid grid-cols-2 gap-2.5">
+                  <F label="Número" value={detail?.endereco_numero} />
+                  <F label="Complemento" value={detail?.endereco_complemento} />
+                </div>
+                <F label="Bairro" value={detail?.endereco_bairro} />
+                <F label="Cidade" value={detail?.endereco_cidade} />
+              </div>
+            )}
+
+            {sheetTab === 'contatos' && (
+              <div className="space-y-2">
+                {(contatosData || []).length === 0 ? (
+                  <p className="py-6 text-center text-xs text-muted-foreground">Nenhum contato cadastrado.</p>
+                ) : (
+                  (contatosData || []).map(ct => (
+                    <div key={ct.id || ct.email} className="rounded-lg border border-border/60 bg-muted/20 p-3">
+                      <p className="text-sm font-medium text-foreground">{ct.nome || '-'}</p>
+                      {ct.email && <p className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground"><Mail className="h-3 w-3" />{ct.email}</p>}
+                      {ct.telefone && <p className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground"><Phone className="h-3 w-3" />{fmtPhone(ct.telefone)}</p>}
+                    </div>
+                  ))
+                )}
+                <button onClick={openEdit}
+                  className="w-full rounded-lg border border-primary/30 py-2 text-xs font-medium text-primary transition-colors hover:bg-primary/10">
+                  Gerenciar contatos
+                </button>
+              </div>
+            )}
+
+            {sheetTab === 'responsaveis' && (
+              <div className="space-y-3">
+                {(detail?.responsaveis || []).length === 0 ? (
+                  <p className="py-4 text-center text-xs text-muted-foreground">Nenhum responsável atribuído.</p>
+                ) : (
+                  (detail?.responsaveis || []).map(r => (
+                    <div key={r.id} className="rounded-lg border border-border/60 bg-muted/20 p-3">
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs font-semibold text-primary">{r.department_name}</p>
+                        {changingRespId === r.id ? (
+                          <button onClick={() => setChangingRespId(null)} className="text-xs text-muted-foreground hover:text-foreground">Cancelar</button>
+                        ) : (
+                          <button onClick={() => { setChangingRespId(r.id); setChangeUserId('') }}
+                            className="rounded-md px-2 py-1 text-xs font-medium text-primary transition-colors hover:bg-primary/10">
+                            Alterar
+                          </button>
+                        )}
+                      </div>
+                      {changingRespId === r.id ? (
+                        <div className="mt-2 space-y-2">
+                          <select value={changeUserId} onChange={e => setChangeUserId(e.target.value)} className={selectCls}>
+                            <option value="">Selecionar novo responsável…</option>
+                            {(users || []).filter(u => u.departamento_id === r.department_id || u.departamento_id === null).map(u => (
+                              <option key={u.id} value={u.id}>{u.display_name}</option>
+                            ))}
+                          </select>
+                          <button onClick={() => changeResponsavel(r.id)} disabled={!changeUserId}
+                            className="w-full rounded-lg bg-primary px-3 py-2 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-40">
+                            Confirmar alteração
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="mt-1.5 flex items-center justify-between gap-2">
+                          <p className="text-sm text-foreground">{r.user_name}</p>
+                          <button onClick={() => removeResponsavel(r)} title="Remover"
+                            className="rounded p-1 text-muted-foreground transition-colors hover:bg-rose-50 hover:text-rose-600">
                             <Trash2 className="h-3.5 w-3.5" />
                           </button>
                         </div>
-                      </div>
-                    ))}
-                    {contatos.length > 0 && (
-                      <button onClick={salvarContatos}
-                        className="w-full rounded-lg border border-[#0078d4]/30 py-1.5 text-xs font-medium text-[#0078d4] transition-colors hover:bg-[#0078d4]/10">
-                        Salvar contatos
-                      </button>
-                    )}
-                  </div>
-                </div>
+                      )}
+                    </div>
+                  ))
+                )}
 
-                <div className="flex gap-2">
-                  <button onClick={() => salvar.mutate()} disabled={salvar.isPending}
-                    className="inline-flex flex-1 items-center justify-center gap-2 rounded-lg bg-primary px-3 py-2 text-xs font-medium text-primary-foreground shadow-md shadow-primary/30 transition-colors hover:bg-primary/90 disabled:opacity-40">
-                    <Save className="h-4 w-4" />
-                    Salvar alterações
-                  </button>
-                  <button onClick={() => setEditing(false)}
-                    className="rounded-lg border border-border px-3 py-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted">
-                    Cancelar
-                  </button>
+                <div className="border-t border-border/60 pt-3">
+                  {assigning ? (
+                    <div className="space-y-2">
+                      <select value={assignDeptId} onChange={e => { setAssignDeptId(e.target.value); setAssignUserId('') }} className={selectCls}>
+                        <option value="">Departamento…</option>
+                        {(departments || []).filter(d => !(detail?.responsaveis || []).some(r => r.department_id === d.id)).map(d => (
+                          <option key={d.id} value={d.id}>{d.nome}</option>
+                        ))}
+                      </select>
+                      <select value={assignUserId} onChange={e => setAssignUserId(e.target.value)} disabled={!assignDeptId} className={selectCls}>
+                        <option value="">Usuário…</option>
+                        {assignDeptId && (users || []).filter(u => u.departamento_id === parseInt(assignDeptId) || u.departamento_id === null).map(u => (
+                          <option key={u.id} value={u.id}>{u.display_name}</option>
+                        ))}
+                      </select>
+                      <div className="flex gap-2">
+                        <button onClick={() => { setAssigning(false); setAssignDeptId(''); setAssignUserId('') }}
+                          className="flex-1 rounded-lg border border-border px-3 py-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted">
+                          Cancelar
+                        </button>
+                        <button onClick={assignResponsavel} disabled={!assignDeptId || !assignUserId}
+                          className="flex-1 rounded-lg border border-primary/30 px-3 py-2 text-xs font-medium text-primary transition-colors hover:bg-primary/10 disabled:opacity-40">
+                          Atribuir
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button onClick={() => setAssigning(true)}
+                      className="w-full rounded-lg border border-primary/30 py-2 text-xs font-medium text-primary transition-colors hover:bg-primary/10">
+                      + Adicionar responsável
+                    </button>
+                  )}
                 </div>
-              </>
+              </div>
             )}
           </div>
         </div>
       )}
+
+      {/* ── Modal Novo/Editar ── */}
+      {showModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="flex max-h-[90vh] w-[760px] max-w-full flex-col overflow-hidden rounded-xl border border-border bg-card shadow-lg">
+            <div className="flex items-center justify-between border-b border-border/60 px-6 py-4">
+              <h3 className="text-sm font-semibold text-foreground">{editingId ? 'Editar Cliente' : 'Novo Cliente'}</h3>
+              <button onClick={() => setShowModal(false)}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="flex shrink-0 gap-1 border-b border-border/60 px-6">
+              {MODAL_TABS.map(t => (
+                <button key={t.key} onClick={() => setModalTab(t.key)}
+                  className={`border-b-2 px-3 py-2.5 text-xs font-medium transition-colors ${modalTab === t.key ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'} ${t.key === 'responsaveis' && !editingId ? 'cursor-not-allowed opacity-40' : ''}`}>
+                  {t.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-6">
+              {/* Empresa */}
+              {modalTab === 'empresa' && (
+                <div className="grid grid-cols-2 gap-5">
+                  <div className="space-y-3">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-primary">Dados gerais</p>
+                    <Inp label="Razão Social" field="name" placeholder="Nome ou razão social" />
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-muted-foreground">CNPJ</label>
+                      <div className="flex items-center gap-2">
+                        <input value={fmtCNPJInput(form.cnpj || '')}
+                          onChange={e => updateForm('cnpj', e.target.value.replace(/\D/g, '').slice(0, 14))}
+                          placeholder="00.000.000/0000-00" autoComplete="off"
+                          className="h-9 flex-1 rounded-md border border-input bg-background px-3 font-mono text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
+                        <button onClick={cnpjLookup} disabled={cnpjLoading || (form.cnpj || '').replace(/\D/g, '').length !== 14}
+                          className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md border border-primary/30 px-3 text-xs font-medium text-primary transition-colors hover:bg-primary/10 disabled:opacity-40">
+                          {cnpjLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+                          {cnpjLoading ? '...' : 'Buscar'}
+                        </button>
+                      </div>
+                      <p className="mt-1 text-[11px] text-muted-foreground">Consulta automática via Brasil API (CNAEs e regime tributário)</p>
+                    </div>
+                    <Inp label="Nome Fantasia" field="nome_fantasia" placeholder="Nome fantasia" />
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-muted-foreground">Regime Tributário</label>
+                      <select value={form.regime || ''} onChange={e => updateForm('regime', e.target.value)} className={selectCls}>
+                        <option value="">Selecione…</option>
+                        {REGIMES.map(r => <option key={r} value={r}>{r}</option>)}
+                      </select>
+                    </div>
+                    <Inp label="Telefone" field="telefone" placeholder="(00) 00000-0000" />
+                    <Inp label="E-mail" field="email" type="email" placeholder="email@exemplo.com" />
+                  </div>
+                  <div className="space-y-3">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-primary">Endereço</p>
+                    <div className="grid grid-cols-3 gap-2">
+                      <div className="col-span-2"><Inp label="CEP" field="endereco_cep" placeholder="00000-000" /></div>
+                      <Inp label="UF" field="endereco_uf" placeholder="UF" />
+                    </div>
+                    <Inp label="Logradouro" field="endereco_logradouro" placeholder="Rua, avenida…" />
+                    <div className="grid grid-cols-2 gap-2">
+                      <Inp label="Número" field="endereco_numero" placeholder="Nº" />
+                      <Inp label="Complemento" field="endereco_complemento" placeholder="Sala, andar…" />
+                    </div>
+                    <Inp label="Bairro" field="endereco_bairro" placeholder="Bairro" />
+                    <Inp label="Cidade" field="endereco_cidade" placeholder="Cidade" />
+                  </div>
+                </div>
+              )}
+
+              {/* Contatos */}
+              {modalTab === 'contatos' && (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs text-muted-foreground">Gerencie os contatos para envio de e-mails e notificações</p>
+                    <button
+                      onClick={() => setContatos(prev => [...prev, { nome: '', email: '', telefone: '', whatsapp: 1, _temp: true, _notify: true, _exclude: [] }])}
+                      className="rounded-lg border border-primary/30 px-3 py-1.5 text-xs font-medium text-primary transition-colors hover:bg-primary/10">
+                      + Contato
+                    </button>
+                  </div>
+                  {contatos.filter(c => !c._deleted).length === 0 ? (
+                    <p className="py-8 text-center text-xs text-muted-foreground">Nenhum contato cadastrado</p>
+                  ) : (
+                    <div className="max-h-[50vh] space-y-2 overflow-y-auto">
+                      {contatos.filter(c => !c._deleted).map((ct, idx) => (
+                        <div key={idx} className="space-y-2 rounded-lg border border-border/60 bg-muted/20 p-3">
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <label className="mb-1 block text-xs text-muted-foreground">Nome</label>
+                              <input value={ct.nome} onChange={e => { const n = [...contatos]; n[contatos.indexOf(ct)].nome = e.target.value; setContatos(n) }} placeholder="Nome"
+                                className="h-8 w-full rounded-md border border-input bg-background px-2.5 text-xs focus:outline-none focus:ring-1 focus:ring-ring" />
+                            </div>
+                            <div>
+                              <label className="mb-1 block text-xs text-muted-foreground">E-mail</label>
+                              <input value={ct.email} onChange={e => { const n = [...contatos]; n[contatos.indexOf(ct)].email = e.target.value; setContatos(n) }} placeholder="email@exemplo.com"
+                                className="h-8 w-full rounded-md border border-input bg-background px-2.5 text-xs focus:outline-none focus:ring-1 focus:ring-ring" />
+                            </div>
+                            <div>
+                              <label className="mb-1 block text-xs text-muted-foreground">Telefone</label>
+                              <input value={ct.telefone} onChange={e => { const n = [...contatos]; n[contatos.indexOf(ct)].telefone = e.target.value; setContatos(n) }} placeholder="(00) 00000-0000"
+                                className="h-8 w-full rounded-md border border-input bg-background px-2.5 text-xs focus:outline-none focus:ring-1 focus:ring-ring" />
+                            </div>
+                            <div className="flex items-end justify-between gap-2">
+                              <label className="flex items-center gap-1.5 pb-2">
+                                <input type="checkbox" checked={!!ct.whatsapp}
+                                  onChange={e => { const n = [...contatos]; n[contatos.indexOf(ct)].whatsapp = e.target.checked ? 1 : 0; setContatos(n) }}
+                                  className="h-3.5 w-3.5 rounded border-input accent-primary" />
+                                <span className="text-xs text-muted-foreground">WhatsApp</span>
+                              </label>
+                              <button onClick={() => { const n = [...contatos]; const cc = n[contatos.indexOf(ct)]; cc._deleted = true; setContatos(n) }}
+                                className="rounded p-1.5 text-muted-foreground transition-colors hover:bg-rose-50 hover:text-rose-600" title="Remover contato">
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                          {ct.email && (
+                            <div className="border-t border-border/60 pt-2">
+                              <label className="flex cursor-pointer items-center gap-2">
+                                <input type="checkbox" checked={!!ct._notify}
+                                  onChange={e => { const n = [...contatos]; n[contatos.indexOf(ct)]._notify = e.target.checked; if (e.target.checked) n[contatos.indexOf(ct)]._exclude = []; setContatos(n) }}
+                                  className="h-3.5 w-3.5 rounded border-input accent-primary" />
+                                <span className="text-xs text-muted-foreground">Notificar por e-mail</span>
+                              </label>
+                              {ct._notify && (departments || []).length > 0 && (
+                                <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1.5">
+                                  {(departments || []).map(d => (
+                                    <label key={d.id} className="flex cursor-pointer items-center gap-1.5">
+                                      <input type="checkbox" checked={!ct._exclude?.includes(d.id)}
+                                        onChange={e => {
+                                          const n = [...contatos]; const i = contatos.indexOf(ct); const exc = n[i]._exclude || []
+                                          if (e.target.checked) n[i]._exclude = exc.filter(x => x !== d.id)
+                                          else n[i]._exclude = [...exc, d.id]
+                                          setContatos(n)
+                                        }}
+                                        className="h-3.5 w-3.5 rounded border-input accent-primary" />
+                                      <span className="text-xs text-muted-foreground">{d.nome}</span>
+                                    </label>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Particularidades */}
+              {modalTab === 'particularidades' && (
+                <div>
+                  <p className="mb-3 text-xs text-muted-foreground">Informações importantes sobre este cliente</p>
+                  <textarea value={form.observacoes || ''} onChange={e => updateForm('observacoes', e.target.value)}
+                    placeholder="Observações, instruções especiais, particularidades do cliente…"
+                    className="min-h-[150px] w-full resize-y rounded-md border-2 border-amber-500/30 bg-background px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:border-amber-500 focus:outline-none" />
+                  <p className="mt-2 text-xs text-amber-600">Campos em destaque indicam informações relevantes</p>
+                </div>
+              )}
+
+              {/* CNAEs */}
+              {modalTab === 'cnaes' && (
+                <div>
+                  <p className="mb-3 text-xs text-muted-foreground">CNAEs obtidos da consulta do CNPJ</p>
+                  {cnaes.length > 0 ? (
+                    <div className="space-y-1">
+                      {cnaes.map((c, i) => (
+                        <div key={i} className={`flex items-center gap-3 rounded-lg px-3 py-2 text-xs ${c.principal ? 'border border-primary/30 bg-primary/5' : 'border border-border/60 bg-muted/20'}`}>
+                          <span className="w-16 font-mono text-muted-foreground">{c.codigo}</span>
+                          <span className={c.principal ? 'font-medium text-primary' : 'text-foreground'}>{c.descricao}</span>
+                          {c.principal === 1 && <span className="ml-auto text-[10px] font-semibold uppercase tracking-wide text-primary">Principal</span>}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (form.cnpj || '').replace(/\D/g, '').length === 14 ? (
+                    <p className="text-xs text-muted-foreground">Clique em "Buscar" na aba Empresa para consultar os CNAEs.</p>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">Informe um CNPJ para consultar os CNAEs.</p>
+                  )}
+                </div>
+              )}
+
+              {/* Responsáveis (somente edição) */}
+              {modalTab === 'responsaveis' && editingId && (
+                <div>
+                  <p className="mb-3 text-xs text-muted-foreground">Atribua um responsável por departamento</p>
+                  {(detail?.responsaveis || []).length > 0 ? (
+                    <div className="mb-4 space-y-2">
+                      {(detail?.responsaveis || []).map(r => (
+                        <div key={r.id} className="flex items-center justify-between rounded-lg border border-border/60 bg-muted/20 px-3 py-2">
+                          <div>
+                            <p className="text-xs font-medium text-foreground">{r.user_name}</p>
+                            <p className="text-[10px] text-muted-foreground">{r.department_name}</p>
+                          </div>
+                          <button onClick={() => removeResponsavel(r)} className="text-xs text-muted-foreground transition-colors hover:text-rose-600">✕</button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="mb-4 py-3 text-center text-xs text-muted-foreground">Nenhum responsável atribuído.</p>
+                  )}
+                  <div className="grid grid-cols-2 gap-2">
+                    <select value={assignDeptId} onChange={e => { setAssignDeptId(e.target.value); setAssignUserId('') }} className={selectCls}>
+                      <option value="">Departamento…</option>
+                      {(departments || []).filter(d => !(detail?.responsaveis || []).some(r => r.department_id === d.id)).map(d => (
+                        <option key={d.id} value={d.id}>{d.nome}</option>
+                      ))}
+                    </select>
+                    <select value={assignUserId} onChange={e => setAssignUserId(e.target.value)} disabled={!assignDeptId} className={selectCls}>
+                      <option value="">Usuário…</option>
+                      {assignDeptId && (users || []).filter(u => u.departamento_id === parseInt(assignDeptId) || u.departamento_id === null).map(u => (
+                        <option key={u.id} value={u.id}>{u.display_name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <button onClick={assignResponsavel} disabled={!assignDeptId || !assignUserId}
+                    className="mt-2 w-full rounded-lg bg-primary/10 px-3 py-2 text-xs font-medium text-primary transition-colors hover:bg-primary/20 disabled:opacity-40">
+                    Atribuir
+                  </button>
+                </div>
+              )}
+              {modalTab === 'responsaveis' && !editingId && (
+                <p className="py-6 text-center text-xs text-muted-foreground">
+                  Salve o cliente primeiro para atribuir responsáveis — por padrão, os líderes de cada departamento são indicados automaticamente.
+                </p>
+              )}
+            </div>
+
+            <div className="flex items-center justify-between gap-3 border-t border-border/60 px-6 py-4">
+              <p className="min-w-0 truncate text-xs text-rose-600">{formMsg}</p>
+              <div className="flex shrink-0 gap-3">
+                <button onClick={() => setShowModal(false)}
+                  className="rounded-lg border border-border px-5 py-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted">
+                  Cancelar
+                </button>
+                <button onClick={handleSave} disabled={saving}
+                  className="rounded-lg bg-primary px-5 py-2 text-xs font-medium text-primary-foreground shadow-md shadow-primary/30 transition-colors hover:bg-primary/90 disabled:opacity-40">
+                  {saving ? 'Salvando…' : editingId ? 'Atualizar' : 'Criar Cliente'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function CertificadoForm({ clienteId }: { clienteId?: number }) {
+  const [certFile, setCertFile] = useState<File | null>(null)
+  const [certPass, setCertPass] = useState('')
+  const [sending, setSending] = useState(false)
+  const [msg, setMsg] = useState('')
+
+  const enviar = async () => {
+    if (!certFile || !certPass || !clienteId) return
+    setSending(true)
+    setMsg('')
+    const t = getToken()
+    if (!t) return
+    try {
+      const fd = new FormData()
+      fd.append('certificate_file', certFile)
+      fd.append('certificate_password', certPass)
+      fd.append('client_id', String(clienteId))
+      const r = await fetch('/api/upload/certificate', { method: 'POST', headers: { Authorization: 'Bearer ' + t }, body: fd })
+      const d = await r.json().catch(() => ({}))
+      if (!r.ok) throw new Error(d.detail || 'Erro ao enviar certificado')
+      setCertFile(null)
+      setCertPass('')
+      setMsg('Certificado enviado com sucesso!')
+    } catch (e: unknown) {
+      setMsg(e instanceof Error ? e.message : 'Erro ao enviar certificado')
+    }
+    setSending(false)
+  }
+
+  return (
+    <div className="space-y-2">
+      <input type="file" accept=".pfx,.p12" onChange={e => setCertFile(e.target.files?.[0] || null)}
+        className="w-full text-xs text-foreground file:mr-2 file:rounded-md file:border-0 file:bg-[#0078d4]/10 file:px-2.5 file:py-1 file:text-xs file:font-medium file:text-[#0078d4]" />
+      <input type="password" value={certPass} onChange={e => setCertPass(e.target.value)}
+        placeholder="Senha do certificado" autoComplete="new-password"
+        className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
+      <button onClick={enviar} disabled={!certFile || !certPass || sending}
+        className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-3 py-2 text-xs font-medium text-primary-foreground shadow-md shadow-primary/30 transition-colors hover:bg-primary/90 disabled:opacity-40">
+        <Upload className="h-4 w-4" />
+        {sending ? 'Enviando…' : 'Enviar certificado'}
+      </button>
+      {msg && <p className="text-xs text-muted-foreground">{msg}</p>}
     </div>
   )
 }

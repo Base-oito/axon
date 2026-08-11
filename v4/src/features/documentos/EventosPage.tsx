@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { apiFetch } from '@/lib/api'
 import { AlertTriangle } from 'lucide-react'
+import { SortableTh, sortItems, useSortable } from '@/components/ui/sortable'
 
 interface Evento {
   id: number
@@ -35,6 +36,14 @@ export default function EventosPage() {
   // Filtra apenas os que são eventos de fato
   const eventos = (data?.documents || [])
 
+  const s = useSortable('issued_at')
+  const sorted = sortItems(eventos, s.sortKey, s.sortDir, e => {
+    if (s.sortKey === 'status') return e.status || ''
+    if (s.sortKey === 'access_key') return e.access_key || ''
+    if (s.sortKey === 'movement') return e.movement_type || ''
+    return e.issued_at || ''
+  })
+
   return (
     <div className="space-y-5">
       <div>
@@ -49,15 +58,15 @@ export default function EventosPage() {
           <table className="w-full text-sm">
             <thead className="border-b border-border/60 bg-muted/30">
               <tr className="text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                <th className="px-4 py-2">Evento</th>
-                <th className="px-3 py-2">Chave</th>
-                <th className="px-3 py-2">Data</th>
-                <th className="px-3 py-2">Movimento</th>
-                <th className="px-4 py-2 text-right">XML</th>
+                <SortableTh k="status" sortKey={s.sortKey} sortDir={s.sortDir} onToggle={s.toggle}>Evento</SortableTh>
+                <SortableTh k="access_key" sortKey={s.sortKey} sortDir={s.sortDir} onToggle={s.toggle}>Chave</SortableTh>
+                <SortableTh k="issued_at" sortKey={s.sortKey} sortDir={s.sortDir} onToggle={s.toggle}>Data</SortableTh>
+                <SortableTh k="movement" sortKey={s.sortKey} sortDir={s.sortDir} onToggle={s.toggle}>Movimento</SortableTh>
+                <th className="px-4 py-2 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">XML</th>
               </tr>
             </thead>
             <tbody>
-              {eventos.map(e => (
+              {sorted.map(e => (
                 <tr key={e.id} className="border-t border-border/40 transition-colors hover:bg-muted/30">
                   <td className="px-4 py-2">
                     <span className="inline-flex items-center gap-1.5 rounded bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700">

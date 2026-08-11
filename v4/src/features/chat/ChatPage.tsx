@@ -1,12 +1,21 @@
 import { useEffect, useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiFetch, getToken } from '@/lib/api'
-import { Send, MessageSquare, Search, MoreVertical, Reply, Forward, ClipboardList, Trash2, X, Plus, Mic, Paperclip, Square, Trash, Info, Copy, Users, Pin } from 'lucide-react'
+import { useVoice } from '@/features/chat/voice/VoiceProvider'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
+import { Send, MessageSquare, Search, MoreVertical, Reply, Forward, ClipboardList, Trash2, X, Plus, Mic, Paperclip, Square, Trash, Info, Copy, Users, Pin, PhoneOff, Headphones } from 'lucide-react'
 
-interface Canal { id: number; nome: string; fixo?: boolean }
+interface Canal { id: number; nome: string; fixo?: boolean; tipo?: string }
 interface Usuario { id: number; display_name?: string; username?: string; role?: string }
 
 interface Reacao { user_id: number; reacao: string; user_name: string }
+
+interface Visualizacao {
+  user_id: number
+  viewed_at?: string
+  display_name?: string
+  username?: string
+}
 
 interface Mensagem {
   id: number
@@ -18,6 +27,7 @@ interface Mensagem {
   de_user_id?: number
   created_at?: string
   reacoes?: Reacao[]
+  visualizacoes?: Visualizacao[]
   anexos?: any[]
 }
 
@@ -47,6 +57,23 @@ function fmtDateTime(d?: string) {
   return dt.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }) + ' ' + time
 }
 
+function fmtViewTime(d?: string) {
+  if (!d) return ''
+  const dt = new Date(d)
+  if (isNaN(dt.getTime())) return ''
+  const hoje = new Date()
+  const sameDay = dt.toDateString() === hoje.toDateString()
+  const time = dt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+  if (sameDay) return time
+  return dt.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }) + ' ' + time
+}
+
+function shortName(nome: string) {
+  const parts = nome.split(' ')
+  if (parts.length === 1) return nome
+  return parts[0] + ' ' + parts[parts.length - 1]
+}
+
 function groupReactions(reacoes: Reacao[] = []): Array<{ reacao: string; count: number }> {
   const map = new Map<string, number>()
   for (const r of reacoes) map.set(r.reacao, (map.get(r.reacao) || 0) + 1)
@@ -67,6 +94,7 @@ const EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🙏']
 export default function ChatPage() {
   const qc = useQueryClient()
   const me = getUserId()
+  const voice = useVoice()
   const [activeType, setActiveType] = useState<'channel' | 'dm' | null>(null)
   const [activeId, setActiveId] = useState<number | null>(null)
   const [texto, setTexto] = useState('')
@@ -94,12 +122,15 @@ export default function ChatPage() {
   const [recording, setRecording] = useState(false)
   const [recTime, setRecTime] = useState(0)
   const [dragOver, setDragOver] = useState(false)
+  const [msgSearch, setMsgSearch] = useState('')
+  const [vistoMsgId, setVistoMsgId] = useState<number | null>(null)
   const recorderRef = useRef<MediaRecorder | null>(null)
   const recChunksRef = useRef<Blob[]>([])
   const recTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const justSent = useRef(false)
 
   // ── Queries ──────────────────────────────────────────
   const { data: canais } = useQuery({
@@ -123,14 +154,15 @@ export default function ChatPage() {
     refetchInterval: 60_000,
   })
   const { data: mensagens } = useQuery({
-    queryKey: ['chat-msgs', activeType, activeId],
+    queryKey: ['chat-msgs', activeType, activeId, msgSearch],
     queryFn: () => {
-      const url = activeType === 'channel' ? `/api/chat/mensagens/${activeId}` : `/api/chat/dm/${activeId}`
+      const base = activeType === 'channel' ? `/api/chat/mensagens/${activeId}` : `/api/chat/dm/${activeId}`
+      const url = msgSearch.trim() ? `${base}?search=${encodeURIComponent(msgSearch.trim())}` : base
       return apiFetch<Mensagem[]>(url)
     },
     enabled: !!activeType && !!activeId,
-    refetchInterval: 10_000,
-    staleTime: 5_000,
+    refetchInterval: msgSearch ? false : 10_000,
+    staleTime: msgSearch ? 30_000 : 5_000,
   })
 
   // Ordem cronológica: mais antigas em cima, mais recentes embaixo
@@ -300,6 +332,8 @@ export default function ChatPage() {
       setTexto('')
       setReplyTo(null)
       setAttachments([])
+      setMsgSearch('')
+      justSent.current = true
       invalidade()
     },
   })
@@ -353,6 +387,7 @@ export default function ChatPage() {
   useEffect(() => {
     if (!activeType || !activeId) return
     justOpened.current = true
+    justSent.current = false
     return () => { justOpened.current = false }
   }, [activeType, activeId])
 
@@ -363,6 +398,15 @@ export default function ChatPage() {
     justOpened.current = false
   }, [mensagensOrdenadas])
 
+  // ── Rolagem automática APENAS quando a gente ENVIA uma mensagem ──
+  //    (nunca ao receber, para não atrapalhar a busca de mensagens antigas)
+  useEffect(() => {
+    if (!justSent.current || !mensagensOrdenadas || mensagensOrdenadas.length === 0) return
+    const el = listRef.current
+    if (el) el.scrollTop = el.scrollHeight
+    justSent.current = false
+  }, [mensagensOrdenadas])
+
   // ── Autosize do textarea ─────────────────────────────
   useEffect(() => {
     const ta = textareaRef.current
@@ -371,14 +415,16 @@ export default function ChatPage() {
     ta.style.height = Math.min(ta.scrollHeight, 160) + 'px'
   }, [texto])
 
-  const selectChannel = (c: Canal) => { setActiveType('channel'); setActiveId(c.id); setReplyTo(null); setShowDetail(false) }
-  const selectDM = (u: Usuario) => { setActiveType('dm'); setActiveId(u.id); setReplyTo(null); setShowDetail(false) }
+  const selectChannel = (c: Canal) => { setActiveType('channel'); setActiveId(c.id); setReplyTo(null); setShowDetail(false); setMsgSearch(''); setVistoMsgId(null) }
+  const selectDM = (u: Usuario) => { setActiveType('dm'); setActiveId(u.id); setReplyTo(null); setShowDetail(false); setMsgSearch(''); setVistoMsgId(null) }
 
   const fecharConversa = () => {
     setActiveType(null)
     setActiveId(null)
     setReplyTo(null)
     setShowDetail(false)
+    setMsgSearch('')
+    setVistoMsgId(null)
     setDmSearch('')
     setParticipantSearch('')
   }
@@ -506,7 +552,7 @@ export default function ChatPage() {
         <div className="border-b border-border/40 px-3 py-2">
           <p className="px-2 pb-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Canais</p>
           <div className="space-y-0.5">
-            {(canais || []).map(c => {
+            {(canais || []).filter(c => c.tipo !== 'voz').map(c => {
               const un = getUnread('channel', c.id)
               const active = activeType === 'channel' && activeId === c.id
               return (
@@ -577,13 +623,56 @@ export default function ChatPage() {
         <div className="flex items-center gap-2 border-b border-border/60 px-4 py-3">
           {activeType === 'dm' && dmAtivo && avatar(dmAtivo.display_name || dmAtivo.username || '?')}
           <h2 className="flex-1 truncate text-sm font-semibold text-foreground">{titulo}</h2>
+          {activeType && (
+            <div className={`flex items-center gap-1.5 rounded-lg border transition-all ${msgSearch ? 'border-[#0078d4]/50 bg-[#0078d4]/5' : 'border-transparent'}`}>
+              <Search className="ml-2 h-4 w-4 shrink-0 text-muted-foreground" />
+              <input
+                value={msgSearch}
+                onChange={e => setMsgSearch(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Escape') setMsgSearch('') }}
+                placeholder="Buscar mensagens…"
+                className="h-8 w-32 bg-transparent text-xs text-foreground placeholder:text-muted-foreground focus:outline-none sm:w-44"
+              />
+              {msgSearch && (
+                <button
+                  onClick={() => setMsgSearch('')}
+                  title="Limpar busca"
+                  className="mr-1 flex h-5 w-5 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              )}
+            </div>
+          )}
           {activeType === 'channel' && (
-            <button onClick={toggleDetail}
-              title="Membros do canal"
-              className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-2 text-xs transition-colors ${showDetail ? 'bg-[#0078d4]/10 text-[#0078d4]' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}>
-              <Users className="h-4 w-4" />
-              {participantes.length > 0 ? participantes.length : 'Membros'}
-            </button>
+            <>
+              {voice.canalId === activeId && voice.status === 'connected' ? (
+                <button
+                  onClick={voice.leaveVoice}
+                  title="Sair do modo voz"
+                  className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-rose-600 px-3 text-xs font-medium text-white transition-colors hover:bg-rose-700"
+                >
+                  <PhoneOff className="h-4 w-4" />
+                  <span className="hidden sm:inline">Sair do modo voz</span>
+                </button>
+              ) : (
+                <button
+                  onClick={() => voice.enterVoice(activeId!, titulo || 'Canal')}
+                  title="Entrar no canal de voz"
+                  disabled={voice.status === 'connecting'}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-[#0078d4]/10 px-3 text-xs font-medium text-[#0078d4] transition-colors hover:bg-[#0078d4] hover:text-white disabled:opacity-50"
+                >
+                  <Headphones className="h-4 w-4" />
+                  <span className="hidden sm:inline">Entrar no modo voz</span>
+                </button>
+              )}
+              <button onClick={toggleDetail}
+                title="Membros do canal"
+                className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-2 text-xs transition-colors ${showDetail ? 'bg-[#0078d4]/10 text-[#0078d4]' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}>
+                <Users className="h-4 w-4" />
+                {participantes.length > 0 ? participantes.length : 'Membros'}
+              </button>
+            </>
           )}
           {activeType === 'dm' && (
             <button onClick={toggleDetail}
@@ -612,11 +701,14 @@ export default function ChatPage() {
         </div>
 
         <div ref={listRef} className="flex-1 space-y-4 overflow-y-auto p-4">
+          <TooltipProvider delayDuration={150}>
           {mensagensOrdenadas.map(m => {
             const isMine = m.de_user_id === me.id
             const nome = m.de_user_name || m.sender_name || '—'
             const reacs = groupReactions(m.reacoes)
             const msgText = getText(m)
+            const visualizacoes = (m.visualizacoes || []).filter(v => v.user_id !== me.id)
+            const vistos = visualizacoes.filter(v => v.viewed_at)
             return (
               <div key={m.id} className={`group relative flex gap-2 ${isMine ? 'flex-row-reverse' : ''}`}>
                 {!isMine && avatar(nome)}
@@ -663,12 +755,66 @@ export default function ChatPage() {
                   {/* Reações */}
                   {reacs.length > 0 && (
                     <div className={`mt-1 flex gap-1 ${isMine ? 'justify-end' : ''}`}>
-                      {reacs.map((r, i) => (
-                        <span key={i} className="rounded-full border border-border bg-card px-1.5 py-0.5 text-xs shadow-sm">
-                          {r.reacao} {r.count > 1 ? r.count : ''}
-                        </span>
-                      ))}
+                      {reacs.map((r, i) => {
+                        const reagentes = (m.reacoes || []).filter(x => x.reacao === r.reacao).map(x => x.user_name || '—')
+                        return (
+                          <Tooltip key={i}>
+                            <TooltipTrigger asChild>
+                              <span className="cursor-default rounded-full border border-border bg-card px-1.5 py-0.5 text-xs shadow-sm">
+                                {r.reacao} {r.count > 1 ? r.count : ''}
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent className="max-w-[220px] text-xs">
+                              {reagentes.join(', ')}
+                            </TooltipContent>
+                          </Tooltip>
+                        )
+                      })}
                     </div>
+                  )}
+                  {/* Visto por: DM mostra inline; grupo mostra ícone "i" que abre a lista */}
+                  {isMine && vistos.length > 0 && (
+                    activeType === 'dm' ? (
+                      <div className="mt-0.5 flex items-center gap-1 pr-1">
+                        <span className="text-[10px] text-muted-foreground/70">
+                          {`Visto por ${shortName(vistos[0].display_name || '—')} às ${fmtViewTime(vistos[0].viewed_at)}`}
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="relative mt-0.5 flex items-center justify-end gap-1 pr-1">
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <button
+                              onClick={() => setVistoMsgId(vistoMsgId === m.id ? null : m.id)}
+                              className={`flex h-5 w-5 items-center justify-center rounded-full transition-colors ${
+                                vistoMsgId === m.id
+                                  ? 'bg-[#0078d4] text-white'
+                                  : 'bg-muted/60 text-muted-foreground hover:bg-muted hover:text-foreground'
+                              }`}
+                              title="Ver quem visualizou"
+                            >
+                              <Info className="h-3 w-3" />
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent className="text-xs">Visualizações ({vistos.length})</TooltipContent>
+                        </Tooltip>
+                        {vistoMsgId === m.id && (
+                          <div className="absolute bottom-6 right-0 z-20 w-52 overflow-hidden rounded-lg border border-border bg-popover shadow-lg">
+                            <div className="border-b border-border/60 px-3 py-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                              Visto por {vistos.length} {vistos.length === 1 ? 'pessoa' : 'pessoas'}
+                            </div>
+                            <div className="max-h-44 overflow-y-auto p-1">
+                              {vistos.map(v => (
+                                <div key={v.user_id} className="flex items-center justify-between gap-3 rounded-md px-2 py-1.5 transition-colors hover:bg-muted/50">
+                                  <span className="truncate text-xs text-foreground">{v.display_name || v.username || '—'}</span>
+                                  <span className="shrink-0 text-[10px] text-muted-foreground">{fmtViewTime(v.viewed_at)}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )
                   )}
                 </div>
                 {/* Menu de ações (hover) */}
@@ -681,8 +827,11 @@ export default function ChatPage() {
               </div>
             )
           })}
+          </TooltipProvider>
           {activeType && mensagensOrdenadas.length === 0 && (
-            <p className="py-8 text-center text-sm text-muted-foreground">Nenhuma mensagem nesta conversa.</p>
+            <p className="py-8 text-center text-sm text-muted-foreground">
+              {msgSearch ? 'Nenhuma mensagem encontrada para a busca.' : 'Nenhuma mensagem nesta conversa.'}
+            </p>
           )}
         </div>
 

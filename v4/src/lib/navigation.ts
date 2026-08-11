@@ -1,7 +1,7 @@
 import type { LucideIcon } from 'lucide-react'
 import {
   FileText, MessageSquare, LayoutDashboard, Users, CalendarClock,
-  Workflow, MonitorSmartphone, Sparkles, Settings,
+  Workflow, MonitorSmartphone, Sparkles, Settings, ClipboardCheck,
 } from 'lucide-react'
 
 export interface NavItem {
@@ -46,16 +46,21 @@ export const NAV_SECTIONS: NavSection[] = [
     label: 'Clientes',
     icon: Users,
     items: [
-      { label: 'Cadastro', icon: Users, path: '/clientes' },
-      { label: 'Fichas', icon: Users, path: '/clientes/fichas' },
+      { label: 'Clientes', icon: Users, path: '/clientes' },
+    ],
+  },
+  {
+    label: 'Calendário',
+    icon: CalendarClock,
+    items: [
+      { label: 'Calendário', icon: CalendarClock, path: '/calendario' },
     ],
   },
   {
     label: 'Obrigações',
-    icon: CalendarClock,
+    icon: ClipboardCheck,
     items: [
-      { label: 'Calendário', icon: CalendarClock, path: '/obrigacoes' },
-      { label: 'Pendências', icon: CalendarClock, path: '/obrigacoes/pendencias' },
+      { label: 'Modelos e Controle', icon: ClipboardCheck, path: '/obrigacoes' },
     ],
   },
   {
@@ -63,14 +68,14 @@ export const NAV_SECTIONS: NavSection[] = [
     icon: Workflow,
     items: [
       { label: 'Andamentos', icon: Workflow, path: '/processos' },
+      { label: 'Tarefas', icon: Workflow, path: '/tarefas' },
     ],
   },
   {
-    label: 'Agentes',
+    label: 'Automação',
     icon: MonitorSmartphone,
     items: [
-      { label: 'Saúde', icon: MonitorSmartphone, path: '/agentes' },
-      { label: 'Versões', icon: MonitorSmartphone, path: '/agentes/versoes' },
+      { label: 'Automação', icon: MonitorSmartphone, path: '/automacao' },
     ],
   },
   {

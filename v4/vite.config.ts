@@ -18,6 +18,7 @@ export default defineConfig({
         manualChunks: {
           react: ['react', 'react-dom', 'react-router-dom'],
           query: ['@tanstack/react-query'],
+          livekit: ['livekit-client', '@livekit/components-react'],
         },
       },
     },
