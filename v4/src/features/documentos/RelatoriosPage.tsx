@@ -40,6 +40,7 @@ export default function RelatoriosPage() {
   const queryClient = useQueryClient()
   const [tipo, setTipo] = useState<'pdf' | 'excel' | 'xmlzip'>('excel')
   const [docType, setDocType] = useState<'todas' | 'nfse' | 'mercadorias'>('todas')
+  const [movement, setMovement] = useState<'todas' | 'prestados' | 'tomados'>('todas')
   const [cliente, setCliente] = useState('')
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
@@ -75,6 +76,7 @@ export default function RelatoriosPage() {
       tipo,
       doc_type: docType === 'todas' ? 'both' : docType,
     }
+    if (docType === 'nfse' && movement !== 'todas') body.movement = movement
     if (cliente) body.cliente_id = cliente
     if (from) body.issued_from = from
     if (to) body.issued_to = to
@@ -139,6 +141,17 @@ export default function RelatoriosPage() {
               <option value="mercadorias">NF-e</option>
             </select>
           </div>
+          {docType === 'nfse' && (
+            <div>
+              <label className="mb-1 block text-xs font-medium text-muted-foreground">Movimento</label>
+              <select value={movement} onChange={e => setMovement(e.target.value as any)}
+                className="h-9 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-ring">
+                <option value="todas">Prestadas e Tomadas</option>
+                <option value="prestados">Prestadas</option>
+                <option value="tomados">Tomadas</option>
+              </select>
+            </div>
+          )}
           <div>
             <label className="mb-1 block text-xs font-medium text-muted-foreground">Empresa</label>
             <select value={cliente} onChange={e => setCliente(e.target.value)}
