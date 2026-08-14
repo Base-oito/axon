@@ -399,7 +399,7 @@ export default function ProcessosPage() {
       {subTab === 'kanban' && (
         <div className="space-y-5">
           <div className="text-xs text-muted-foreground">{processos.length} processo(s)</div>
-          <div className="grid grid-cols-4 gap-4" style={{ minHeight: '60vh' }}>
+          <div className="grid grid-cols-5 gap-4" style={{ minHeight: '60vh' }}>
             {KANBAN_COLUMNS.map(col => {
               const colProcesses = processos.filter(p => getKanbanStatus(p) === col.key)
               return (
