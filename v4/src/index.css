@@ -136,6 +136,51 @@
 }
 
 @layer utilities {
+  /* Scrollbar customizada — acompanha o tema (claro/escuro) */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(220 8% 60% / 0.5) transparent;
+  }
+
+  *::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  *::-webkit-scrollbar-thumb {
+    background: hsl(220 8% 60% / 0.45);
+    border-radius: 9999px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+
+  *::-webkit-scrollbar-thumb:hover {
+    background: hsl(220 8% 50% / 0.6);
+    background-clip: content-box;
+    border: 2px solid transparent;
+  }
+
+  .dark * {
+    scrollbar-color: hsl(220 8% 40% / 0.5) transparent;
+  }
+
+  .dark *::-webkit-scrollbar-thumb {
+    background: hsl(220 8% 42% / 0.55);
+    border-radius: 9999px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+
+  .dark *::-webkit-scrollbar-thumb:hover {
+    background: hsl(220 8% 55% / 0.65);
+    background-clip: content-box;
+    border: 2px solid transparent;
+  }
+
   .glass {
     background: rgba(255, 255, 255, 0.72);
     backdrop-filter: blur(16px) saturate(160%);
