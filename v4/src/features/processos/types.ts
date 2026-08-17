@@ -16,6 +16,7 @@ export interface Etapa {
   title: string
   type: StepType
   assignee?: string
+  departamento_id?: number | null
   isCompleted?: boolean
   completedBy?: string
   completedAt?: string
@@ -28,6 +29,7 @@ export interface Etapa {
   dueDate?: string
   notificar_todos?: boolean
   user_id?: string
+  dispara_template_id?: number | string | null
 }
 
 export interface Template {
@@ -68,3 +70,19 @@ export interface RecurrenciaData {
 }
 
 export type RecurrenciaMap = Record<string, RecurrenciaData>
+
+export interface GatilhoInfo {
+  id?: string
+  title?: string
+}
+
+export interface Vinculo {
+  pai: Processo
+  gatilho: GatilhoInfo
+  dispara_template_id: number | string
+  filho: Processo[] | null
+}
+
+export interface VinculosData {
+  vinculos: Vinculo[]
+}

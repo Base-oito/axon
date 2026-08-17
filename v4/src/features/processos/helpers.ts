@@ -4,6 +4,7 @@ export const STATUS_MAP: Record<string, { label: string; color: string }> = {
   Pendente: { label: 'Pendente', color: '#F59E0B' },
   em_execucao: { label: 'Em Execução', color: '#3B82F6' },
   Aguardando_Decisao: { label: 'Aguardando Decisão', color: '#8B5CF6' },
+  Aguardando_Cliente: { label: 'Aguardando Cliente', color: '#06B6D4' },
   Concluida: { label: 'Concluída', color: '#10B981' },
   Cancelada: { label: 'Cancelada', color: '#EF4444' },
 }
@@ -31,6 +32,7 @@ export const KANBAN_COLUMNS = [
   { key: 'Pendente', label: 'Pendente', status: 'Pendente' },
   { key: 'em_execucao', label: 'Em Andamento', status: 'em_execucao' },
   { key: 'Aguardando_Decisao', label: 'Aguardando Decisão', status: 'aguardando_decisao' },
+  { key: 'Aguardando_Cliente', label: 'Aguardando Cliente', status: 'aguardando_cliente' },
   { key: 'Concluida', label: 'Finalizado', status: 'Concluida' },
 ]
 
@@ -38,6 +40,7 @@ export const STATUS_FILTERS = [
   { key: '', label: 'Todos' },
   { key: 'Pendente', label: 'Pendente' },
   { key: 'em_execucao', label: 'Em Andamento' },
+  { key: 'Aguardando_Cliente', label: 'Aguardando Cliente' },
   { key: 'Concluida', label: 'Finalizado' },
   { key: 'Cancelada', label: 'Cancelado' },
 ]
@@ -87,6 +90,7 @@ export function getKanbanStatus(p: Processo): string {
   if (p.status === 'Concluida') return 'Concluida'
   if (p.status === 'Pendente') return 'Pendente'
   if (p.status === 'Cancelada') return 'Cancelada'
+  if (p.status === 'Aguardando_Cliente') return 'Aguardando_Cliente'
   const etapas = safeEtapas(p.etapas)
   const currentIdx = etapas.findIndex(e => !e.isCompleted)
   if (currentIdx >= 0 && (etapas[currentIdx]?.type === 'Decisão' || etapas[currentIdx]?.type === 'Gatilho')) return 'Aguardando_Decisao'
@@ -127,6 +131,30 @@ export function addDays(dateStr: string, days: number): string {
   const d = new Date(dateStr + 'T00:00:00')
   d.setDate(d.getDate() + days)
   return d.toISOString().slice(0, 10)
+}
+
+/**
+ * Calcula a duração total do processo (em dias) considerando paralelismo.
+ * Cada etapa com dependsOn inicia após TODAS as suas dependências terminarem;
+ * etapas independentes rodam em paralelo. Retorna o caminho crítico (máximo).
+ */
+export function calculaDuracaoProcesso(etapas: Etapa[]): number {
+  if (!etapas || etapas.length === 0) return 0
+  const fimPorId: Record<string, number> = {}
+  for (const e of etapas) {
+    const dias = e.dias || 0
+    const deps = e.dependsOn || []
+    let inicio = 0
+    if (deps.length > 0) {
+      inicio = Math.max(...deps.map(d => fimPorId[d] ?? 0))
+    } else if (etapas.indexOf(e) > 0) {
+      // Sem dependência explícita: pode rodar em paralelo, mas respeita a anterior que a precede na ordem
+      const anterior = etapas[etapas.indexOf(e) - 1]
+      inicio = fimPorId[anterior.id] ?? 0
+    }
+    fimPorId[e.id] = inicio + dias
+  }
+  return Math.max(0, ...Object.values(fimPorId))
 }
 
 export function fmtDateBR(d?: string | null): string {

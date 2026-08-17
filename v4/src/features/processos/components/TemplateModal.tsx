@@ -1,10 +1,11 @@
 import { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import type { Departamento } from '../hooks/useShared'
 import type { Etapa, Template } from '../types'
-import { saveTemplate, deleteTemplate } from '../api'
+import { saveTemplate, deleteTemplate, listTemplates } from '../api'
 import {
   CATEGORIAS, RECORRENCIA_OPTIONS, STEP_TYPE_COLORS,
-  genStepId, genSubtaskId, normalizeOptions, safeEtapas,
+  genStepId, genSubtaskId, normalizeOptions, safeEtapas, calculaDuracaoProcesso,
 } from '../helpers'
 
 function MiniBadge({ text, color }: { text: string; color: string }) {
@@ -101,6 +102,8 @@ export default function TemplateModal({ template, departamentos, onClose, onSave
   const updateStepField = (index: number, field: string, value: unknown) => {
     setEtapas(prev => prev.map((s, i) => (i !== index ? s : { ...s, [field]: value })))
   }
+
+  const { data: modelos = [] } = useQuery({ queryKey: ['processo-templates'], queryFn: listTemplates })
 
   const toggleDependsOn = (stepIndex: number, depStepId: string) => {
     setEtapas(prev => prev.map((s, i) => {
@@ -222,6 +225,17 @@ export default function TemplateModal({ template, departamentos, onClose, onSave
                 ))}
               </select>
             </div>
+            {etapas.length > 0 && (
+              <div className="rounded-lg border border-[#0078d4]/25 bg-[#0078d4]/5 p-3">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-[#0078d4]">Duração estimada</p>
+                <p className="mt-1 text-lg font-bold text-foreground">
+                  {calculaDuracaoProcesso(etapas)} dia{calculaDuracaoProcesso(etapas) !== 1 ? 's' : ''}
+                </p>
+                <p className="mt-0.5 text-[10px] text-muted-foreground">
+                  Soma dos dias no caminho crítico (etapas paralelas contam uma vez)
+                </p>
+              </div>
+            )}
             <div>
               <label className="mb-2 block text-xs font-medium text-muted-foreground">Recorrente</label>
               <div className="flex items-center gap-3">
@@ -316,6 +330,19 @@ export default function TemplateModal({ template, departamentos, onClose, onSave
                               className="w-16 rounded border border-border bg-background px-2 py-1 text-center text-xs text-foreground placeholder:text-muted-foreground focus:outline-none"
                             />
                           </div>
+                          <div className="flex items-center gap-1.5">
+                            <label className="text-xs text-muted-foreground">Departamento:</label>
+                            <select
+                              value={etapa.departamento_id != null ? String(etapa.departamento_id) : ''}
+                              onChange={e => updateStepField(idx, 'departamento_id', e.target.value ? Number(e.target.value) : null)}
+                              className="rounded border border-border bg-background px-2 py-1 text-xs text-foreground focus:outline-none"
+                            >
+                              <option value="">(do modelo)</option>
+                              {departamentos.map(d => (
+                                <option key={d.id} value={d.id}>{d.nome}</option>
+                              ))}
+                            </select>
+                          </div>
                           <label className="flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
                             <input
                               type="checkbox"
@@ -397,6 +424,21 @@ export default function TemplateModal({ template, departamentos, onClose, onSave
 
                         {(etapa.type === 'Decisão' || etapa.type === 'Gatilho') && (
                           <div className="space-y-2 border-l-2 border-orange-500/20 pl-2">
+                            {etapa.type === 'Gatilho' && (
+                              <div className="flex items-center gap-2">
+                                <span className="whitespace-nowrap text-xs text-muted-foreground">Dispara o modelo:</span>
+                                <select
+                                  value={etapa.dispara_template_id != null ? String(etapa.dispara_template_id) : ''}
+                                  onChange={e => updateStepField(idx, 'dispara_template_id', e.target.value ? Number(e.target.value) : null)}
+                                  className="flex-1 rounded border border-border bg-background px-2 py-1 text-xs text-foreground focus:outline-none"
+                                >
+                                  <option value="">Nenhum (apenas ramificação)</option>
+                                  {modelos.filter(m => !template || m.id !== template.id).map(m => (
+                                    <option key={m.id} value={m.id}>{m.titulo}</option>
+                                  ))}
+                                </select>
+                              </div>
+                            )}
                             <div className="flex items-center gap-2">
                               <span className="text-xs text-muted-foreground">
                                 {etapa.type === 'Gatilho' ? 'Opcoes de Disparo' : 'Opcoes de Decisao'}

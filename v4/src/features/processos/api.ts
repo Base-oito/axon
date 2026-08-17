@@ -1,5 +1,5 @@
 import { apiFetch, getToken } from '@/lib/api'
-import type { Etapa, Processo, RecurrenciaMap, Template } from './types'
+import type { Etapa, Processo, RecurrenciaMap, Template, VinculosData } from './types'
 
 export async function listTemplates(): Promise<Template[]> {
   return apiFetch<Template[]>('/api/processo-templates')
@@ -7,6 +7,10 @@ export async function listTemplates(): Promise<Template[]> {
 
 export async function listProcessos(): Promise<Processo[]> {
   return apiFetch<Processo[]>('/api/processos')
+}
+
+export async function listVinculos(): Promise<VinculosData> {
+  return apiFetch<VinculosData>('/api/processos/vinculos')
 }
 
 export async function listRecorrencias(): Promise<RecurrenciaMap> {

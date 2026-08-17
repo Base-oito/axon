@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
-import type { Processo, RecurrenciaMap, Template } from './types'
-import { listProcessos, listRecorrencias, listTemplates, createProcesso, deleteProcesso, encerrarRecorrencia, gerarRecorrentes, iniciarRecorrencia, updateProcesso, updateSituacao } from './api'
+import type { Processo, RecurrenciaMap, Template, Vinculo } from './types'
+import { listProcessos, listRecorrencias, listTemplates, createProcesso, deleteProcesso, encerrarRecorrencia, gerarRecorrentes, iniciarRecorrencia, updateProcesso, updateSituacao, listVinculos } from './api'
 import { useClientes, useDepartamentos } from './hooks/useShared'
 import {
   KANBAN_COLUMNS, PRIORIDADE_MAP, STATUS_FILTERS, STATUS_MAP,
@@ -14,7 +14,19 @@ import KanbanPorProcesso from './components/KanbanPorProcesso'
 import ProcessoDetail from './components/ProcessoDetail'
 import { SortableTh, sortItems, useSortable } from '@/components/ui/sortable'
 
-type SubTab = 'modelos' | 'instancias' | 'kanban' | 'recorrencias'
+type SubTab = 'modelos' | 'instancias' | 'kanban' | 'recorrencias' | 'vinculados'
+
+function StatusPill({ status }: { status: string }) {
+  const c = STATUS_MAP[status]?.color || '#535353'
+  return (
+    <span
+      className="whitespace-nowrap rounded px-2 py-0.5 text-[10px] font-medium"
+      style={{ backgroundColor: c + '18', color: c, border: '1px solid ' + c + '35' }}
+    >
+      {STATUS_MAP[status]?.label || status}
+    </span>
+  )
+}
 
 export default function ProcessosPage() {
   const qc = useQueryClient()
@@ -40,6 +52,7 @@ export default function ProcessosPage() {
   const { data: templates = [] } = useQuery({ queryKey: ['processo-templates'], queryFn: listTemplates })
   const { data: processos = [] } = useQuery({ queryKey: ['processos'], queryFn: listProcessos })
   const { data: recorrencias = {} as RecurrenciaMap } = useQuery({ queryKey: ['processo-recorrencias'], queryFn: listRecorrencias })
+  const { data: vinculos = { vinculos: [] as Vinculo[] } } = useQuery({ queryKey: ['processo-vinculos'], queryFn: listVinculos })
   const { data: departamentos = [] } = useDepartamentos()
   const { data: clientes = [] } = useClientes()
 
@@ -47,6 +60,7 @@ export default function ProcessosPage() {
     qc.invalidateQueries({ queryKey: ['processos'] })
     qc.invalidateQueries({ queryKey: ['processo-templates'] })
     qc.invalidateQueries({ queryKey: ['processo-recorrencias'] })
+    qc.invalidateQueries({ queryKey: ['processo-vinculos'] })
     qc.invalidateQueries({ queryKey: ['dashboard'] })
   }
 
@@ -221,7 +235,7 @@ export default function ProcessosPage() {
 
       {/* Sub-tabs */}
       <div className="flex gap-1 border-b border-border/60">
-        {(['modelos', 'instancias', 'kanban', 'recorrencias'] as const).map(tab => (
+        {(['modelos', 'instancias', 'kanban', 'recorrencias', 'vinculados'] as const).map(tab => (
           <button
             key={tab}
             onClick={() => { setSubTab(tab); setSelectedProcesso(null); setEditingSituacao(null) }}
@@ -229,7 +243,7 @@ export default function ProcessosPage() {
               subTab === tab ? 'border-[#0078d4] text-[#0078d4]' : 'border-transparent text-muted-foreground hover:text-foreground'
             }`}
           >
-            {tab === 'modelos' ? 'Modelos' : tab === 'instancias' ? 'Instâncias' : tab === 'kanban' ? 'Kanban' : 'Recorrências'}
+            {tab === 'modelos' ? 'Modelos' : tab === 'instancias' ? 'Instâncias' : tab === 'kanban' ? 'Kanban' : tab === 'recorrencias' ? 'Recorrências' : 'Vinculados'}
           </button>
         ))}
       </div>
@@ -685,6 +699,89 @@ export default function ProcessosPage() {
           </div>
         </div>
       )}
+
+      {/* ===== VINCULADOS ===== */}
+      {subTab === 'vinculados' && (
+        <div className="space-y-5">
+          <div className="flex items-center justify-between">
+            <div className="text-xs text-muted-foreground">
+              {vinculos.vinculos.length} vínculo(s) ativo(s) em execução — gatilhos que já dispararam ou estão configurados para disparar outro processo.
+            </div>
+            <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-[10px] font-medium text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400">
+              Somente em andamento
+            </span>
+          </div>
+
+          {vinculos.vinculos.length === 0 ? (
+            <div className="card-soft rounded-lg bg-card p-16 text-center">
+              <div className="mb-2 text-sm text-muted-foreground">Nenhum processo vinculado em execução.</div>
+              <div className="text-xs text-muted-foreground">
+                Configure um gatilho em um modelo (aba Modelos → etapa "+ Gatilho" → "Dispara o modelo") para criar vínculos automáticos.
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {vinculos.vinculos.map((v: Vinculo, idx) => (
+                <div key={idx} className="card-soft rounded-lg bg-card p-4">
+                  {/* Processo pai */}
+                  <div className="flex flex-wrap items-center gap-3">
+                    <div
+                      className="min-w-0 flex-1 cursor-pointer rounded-lg border border-border bg-muted/20 p-3 transition-colors hover:border-[#0078d4]/30"
+                      onClick={() => { setSubTab('instancias'); setSelectedProcesso(v.pai) }}
+                    >
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Processo origem</p>
+                      <p className="truncate text-sm font-medium text-foreground">{v.pai.titulo}</p>
+                      <div className="mt-1 flex items-center gap-2">
+                        <span className="truncate text-xs text-muted-foreground">{v.pai.cliente_nome || '-'}</span>
+                        <StatusPill status={v.pai.status} />
+                      </div>
+                      {v.gatilho?.title && (
+                        <p className="mt-1.5 text-[11px] text-amber-600 dark:text-amber-400">
+                          ▽ etapa "{v.gatilho.title}"
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="flex flex-col items-center px-1 text-[#0078d4]">
+                      <span className="text-lg leading-none">→</span>
+                      <span className="text-[9px] uppercase tracking-wide text-muted-foreground">dispara</span>
+                    </div>
+
+                    {/* Processos filhos disparados */}
+                    <div className="min-w-0 flex-1 space-y-2">
+                      {v.filho && v.filho.length > 0 ? (
+                        v.filho.map(f => (
+                          <div
+                            key={f.id}
+                            onClick={() => { setSubTab('instancias'); setSelectedProcesso(f) }}
+                            className="cursor-pointer rounded-lg border border-border bg-muted/20 p-3 transition-colors hover:border-[#0078d4]/30"
+                          >
+                            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Processo disparado</p>
+                            <p className="truncate text-sm font-medium text-foreground">{f.titulo}</p>
+                            <div className="mt-1 flex items-center gap-2">
+                              <span className="truncate text-xs text-muted-foreground">{f.cliente_nome || '-'}</span>
+                              <StatusPill status={f.status} />
+                            </div>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="rounded-lg border border-dashed border-border p-3">
+                          <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Modelo configurado no gatilho</p>
+                          <p className="truncate text-sm font-medium text-foreground">
+                            {templates.find(t => t.id === Number(v.dispara_template_id))?.titulo || 'Modelo #' + v.dispara_template_id}
+                          </p>
+                          <p className="mt-1 text-[11px] text-muted-foreground">Ainda não disparado / sem instância ativa.</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {kanbanProcesso && (
         <KanbanPorProcesso processo={kanbanProcesso} onClose={() => { setKanbanProcesso(null); invalidate() }} />
       )}
