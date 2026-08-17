@@ -34,6 +34,10 @@ interface ClienteDetail {
   endereco_uf?: string
   observacoes?: string
   certificate_expires_at?: string
+  download_ativo?: boolean
+  download_nfse_tomados?: boolean
+  download_nfse_prestados?: boolean
+  download_nfe_entrada?: boolean
   responsaveis?: Responsavel[]
 }
 
@@ -364,6 +368,26 @@ export default function ClientesPage() {
     } catch { alert('Erro ao alterar status') }
   }
 
+  const [dlSaving, setDlSaving] = useState(false)
+  const updateDownloadConfig = async (id: number, patch: Record<string, boolean>) => {
+    const t = getToken()
+    if (!t || !id) return
+    setDlSaving(true)
+    try {
+      await fetch(`/api/clientes/${id}/download-config`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + t },
+        body: JSON.stringify(patch),
+      })
+      qc.invalidateQueries({ queryKey: ['clientes'] })
+      refetchDetail()
+    } catch {
+      alert('Erro ao salvar preferências de download')
+    } finally {
+      setDlSaving(false)
+    }
+  }
+
   const handleDelete = async (id: number) => {
     if (!confirm('EXCLUIR PERMANENTEMENTE? Esta ação não pode ser desfeita!')) return
     const t = getToken()
@@ -422,8 +446,14 @@ export default function ClientesPage() {
     } catch { alert('Erro ao remover responsável') }
   }
 
-  const filtered = (clientes || []).filter(c =>
-    !q || c.nome.toLowerCase().includes(q.toLowerCase()) || (c.cnpj || '').includes(q.replace(/\D/g, '')))
+  const filtered = (clientes || []).filter(c => {
+    if (!q) return true
+    const busca = q.trim().toLowerCase()
+    const nome = (c.nome || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    const buscaNorm = busca.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    const cnpjBusca = busca.replace(/\D/g, '')
+    return nome.includes(buscaNorm) || (cnpjBusca && (c.cnpj || '').includes(cnpjBusca))
+  })
 
   const F = ({ label, value }: { label: string; value?: string | null }) => (
     <div>
@@ -445,7 +475,7 @@ export default function ClientesPage() {
 
   return (<div className="flex h-full min-h-[calc(100vh-7rem)] gap-4">
       {/* ── Lista ── */}
-      <div className="flex min-w-0 flex-1 flex-col gap-4">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="text-2xl font-bold tracking-tight text-foreground">Clientes</h1>
@@ -468,13 +498,13 @@ export default function ClientesPage() {
             className="w-full bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none" />
         </div>
 
-        <div className="card-soft overflow-hidden rounded-lg bg-card">
+        <div className="card-soft flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg bg-card">
           {!clientes ? (
             <div className="py-10 text-center text-sm text-muted-foreground">Carregando clientes…</div>
           ) : filtered.length === 0 ? (
             <div className="py-10 text-center text-sm text-muted-foreground">Nenhum cliente encontrado.</div>
           ) : (
-            <div className="grid gap-px bg-border/40 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="grid gap-px overflow-y-auto bg-border/40 sm:grid-cols-2 lg:grid-cols-3">
               {filtered.map(c => (
                 <button key={c.id} onClick={() => openDetail(c.id)}
                   className={`group flex items-center gap-3 bg-card p-4 text-left transition-colors hover:bg-muted/40 ${selectedId === c.id ? 'bg-[#0078d4]/5' : ''}`}>
@@ -575,6 +605,54 @@ export default function ClientesPage() {
                 <div className="space-y-2 rounded-lg border border-border/60 bg-muted/20 p-3">
                   <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Certificado digital</p>
                   <CertificadoForm clienteId={detail?.id} />
+                </div>
+
+                <div className="space-y-2 rounded-lg border border-border/60 bg-muted/20 p-3">
+                  <div className="flex items-center justify-between">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Captura de notas</p>
+                    {dlSaving && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Escolha quais notas este cliente deve buscar automaticamente.
+                  </p>
+                  <label className="flex items-center justify-between rounded-lg border border-border/60 bg-background px-3 py-2">
+                    <span className="text-xs font-medium text-foreground">Baixar notas deste cliente</span>
+                    <input
+                      type="checkbox"
+                      checked={detail?.download_ativo ?? true}
+                      onChange={e => updateDownloadConfig(detail!.id, { download_ativo: e.target.checked })}
+                      className="h-4 w-4 accent-[#0078d4]"
+                    />
+                  </label>
+                  <div className={detail?.download_ativo === false ? 'pointer-events-none opacity-40' : ''}>
+                    <label className="flex items-center justify-between rounded-lg border border-border/60 bg-background px-3 py-2">
+                      <span className="text-xs font-medium text-foreground">NF-e de entrada</span>
+                      <input
+                        type="checkbox"
+                        checked={detail?.download_nfe_entrada ?? true}
+                        onChange={e => updateDownloadConfig(detail!.id, { download_nfe_entrada: e.target.checked })}
+                        className="h-4 w-4 accent-[#0078d4]"
+                      />
+                    </label>
+                    <label className="flex items-center justify-between rounded-lg border border-border/60 bg-background px-3 py-2">
+                      <span className="text-xs font-medium text-foreground">NFS-e prestadas</span>
+                      <input
+                        type="checkbox"
+                        checked={detail?.download_nfse_prestados ?? true}
+                        onChange={e => updateDownloadConfig(detail!.id, { download_nfse_prestados: e.target.checked })}
+                        className="h-4 w-4 accent-[#0078d4]"
+                      />
+                    </label>
+                    <label className="flex items-center justify-between rounded-lg border border-border/60 bg-background px-3 py-2">
+                      <span className="text-xs font-medium text-foreground">NFS-e tomadas</span>
+                      <input
+                        type="checkbox"
+                        checked={detail?.download_nfse_tomados ?? true}
+                        onChange={e => updateDownloadConfig(detail!.id, { download_nfse_tomados: e.target.checked })}
+                        className="h-4 w-4 accent-[#0078d4]"
+                      />
+                    </label>
+                  </div>
                 </div>
               </>
             )}
