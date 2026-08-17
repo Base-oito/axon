@@ -37,24 +37,30 @@ export default function Login() {
   }
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-gradient-to-br from-slate-50 via-white to-blue-50 flex items-center justify-center p-4">
+    <div className="relative min-h-screen overflow-hidden bg-gradient-to-br from-slate-50 via-white to-blue-50 flex items-center justify-center p-4 dark:bg-background dark:from-zinc-950 dark:via-zinc-900 dark:to-blue-950">
       {/* Fundo decorativo — bolhas suaves */}
       <div className="pointer-events-none absolute inset-0">
         <div className="absolute -top-24 -left-24 h-96 w-96 rounded-full bg-primary/10 blur-3xl" />
-        <div className="absolute -bottom-24 -right-24 h-96 w-96 rounded-full bg-blue-400/10 blur-3xl" />
-        <div className="absolute top-1/3 right-1/4 h-64 w-64 rounded-full bg-cyan-300/10 blur-3xl" />
+        <div className="absolute -bottom-24 -right-24 h-96 w-96 rounded-full bg-blue-400/10 blur-3xl dark:bg-blue-600/20" />
+        <div className="absolute top-1/3 right-1/4 h-64 w-64 rounded-full bg-cyan-300/10 blur-3xl dark:bg-cyan-500/20" />
       </div>
 
-      <div className="glass-strong hover-lift relative w-full max-w-md rounded-xl p-8">
+      <div className="relative w-full max-w-md rounded-xl border border-border/60 bg-white p-8 shadow-lg shadow-black/5 dark:bg-card dark:bg-zinc-900 dark:text-foreground dark:shadow-black/40">
         <div className="mb-8 text-center">
-          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-xl bg-primary text-2xl font-bold text-primary-foreground shadow-lg shadow-primary/25">
-            A
-          </div>
-          <h1 className="text-3xl font-bold tracking-tight text-foreground">
-            Axon
-          </h1>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Gestão fiscal inteligente para escritórios contábeis
+          <img
+            src="/axon-logo-light.png"
+            alt="Axon"
+            className="mx-auto mb-4 h-10 w-auto dark:hidden"
+            draggable={false}
+          />
+          <img
+            src="/axon-logo-dark.png"
+            alt="Axon"
+            className="mx-auto mb-4 hidden h-10 w-auto dark:block"
+            draggable={false}
+          />
+          <p className="text-sm text-muted-foreground">
+            Gestão contábil inteligente para escritórios
           </p>
         </div>
 
