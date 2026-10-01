@@ -12,9 +12,7 @@ export default function NFeDashboard() {
     return <div className="text-sm text-muted-foreground">Carregando indicadores de NF-e…</div>
   }
 
-  const totalAno = data.series.reduce((s, m) => s + m.nfe_qtd, 0)
-  const totalValor = data.series.reduce((s, m) => s + m.nfe_valor, 0)
-  const totalIcms = data.series.reduce((s, m) => s + m.nfe_icms, 0)
+  const tot = data.totais || { nfe_total: 0, nfe_hoje: 0 }
 
   return (
     <div className="space-y-6">
@@ -35,9 +33,9 @@ export default function NFeDashboard() {
         <KPIFromSeries label="Valor capturado" getter={m => m.nfe_valor} money accent="green" />
         <KPIFromSeries label="ICMS no mês" getter={m => m.nfe_icms} money accent="amber" />
         <div className="card-soft rounded-lg bg-card p-5">
-          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Acumulado (12m)</p>
-          <p className="mt-2 text-2xl font-bold text-foreground">{totalAno.toLocaleString('pt-BR')}</p>
-          <p className="mt-1 text-xs text-muted-foreground">{formatBRL(totalValor)} · ICMS {formatBRL(totalIcms)}</p>
+          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Total registrado</p>
+          <p className="mt-2 text-2xl font-bold text-foreground">{tot.nfe_total.toLocaleString('pt-BR')}</p>
+          <p className="mt-1 text-xs text-muted-foreground">{tot.nfe_hoje} baixada{tot.nfe_hoje === 1 ? '' : 's'} hoje</p>
         </div>
       </div>
 

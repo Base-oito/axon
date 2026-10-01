@@ -4,8 +4,9 @@ import { Plus, Pencil, Trash2, Download, Check, RotateCcw, FileText, Loader2, X,
 import type { Obrigacao } from '../api'
 import { atualizarObrigacao, atualizarValor, criarObrigacao, excluirObrigacao, listObrigacoes, urlDownloadAnexo, uploadAnexo, alterarStatus } from '../api'
 import { PRIO_BADGE, PRIORIDADES, RECORRENCIA_OPTIONS, STATUS_BADGE, fmtDateBR, fmtMoney, isOverdue, isSoon } from '../helpers'
-import { useClientes, useDepartamentos } from '@/features/processos/hooks/useShared'
+import { useClientesOperacionais, useDepartamentos } from '@/features/processos/hooks/useShared'
 import { SortableTh, sortItems, useSortable } from '@/components/ui/sortable'
+import { openAuthedFile } from '@/lib/api'
 
 function getUserRole(): string {
   try {
@@ -256,9 +257,10 @@ export default function ObrigacoesTab() {
                           ) : (
                             <a
                               href={urlDownloadAnexo(o.id)}
+                              onClick={e => { e.preventDefault(); void openAuthedFile(urlDownloadAnexo(o.id)) }}
                               target="_blank"
                               rel="noreferrer"
-                              className="inline-flex items-center gap-1 text-xs text-[#0078d4] transition-colors hover:underline"
+                              className="inline-flex cursor-pointer items-center gap-1 text-xs text-[#0078d4] transition-colors hover:underline"
                             >
                               <Download className="h-3.5 w-3.5" /> Baixar
                             </a>
@@ -339,7 +341,7 @@ export default function ObrigacoesTab() {
 }
 
 function ObrigacaoModal({ obr, onClose, onSaved }: { obr: Obrigacao | null; onClose: () => void; onSaved: () => void }) {
-  const { data: clientes = [] } = useClientes()
+  const { data: clientes = [] } = useClientesOperacionais()
   const { data: departamentos = [] } = useDepartamentos()
   const [titulo, setTitulo] = useState(obr?.titulo || '')
   const [clienteId, setClienteId] = useState(obr?.cliente_id ? String(obr.cliente_id) : '')

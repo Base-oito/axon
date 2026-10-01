@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiFetch, getToken } from '@/lib/api'
-import { Search, Users, Pencil, X, Plus, Trash2, Phone, Mail, Loader2, Upload } from 'lucide-react'
+import { Search, Users, Pencil, X, Plus, Trash2, Phone, Mail, Loader2, Upload, CheckSquare, UserCog } from 'lucide-react'
 
 interface ClienteList {
   id: number
@@ -10,6 +10,7 @@ interface ClienteList {
   cnpj?: string
   ativo?: boolean
   active?: boolean
+  status?: string
   certificate_expires_at?: string
   departamento?: string
 }
@@ -21,6 +22,7 @@ interface ClienteDetail {
   cnpj?: string
   active?: boolean
   ativo?: boolean
+  status?: string
   nome_fantasia?: string
   regime?: string
   telefone?: string
@@ -91,6 +93,14 @@ function fmtDate(d?: string) {
   return new Date(s + 'T00:00:00').toLocaleDateString('pt-BR')
 }
 
+function statusBadge(status?: string, ativo?: boolean) {
+  const st = (status || (ativo ? 'ativa' : 'inativa')).toLowerCase()
+  if (st === 'prospect') return { label: 'Prospect', cls: 'bg-sky-50 text-sky-700' }
+  if (st === 'lead') return { label: 'Lead', cls: 'bg-violet-50 text-violet-700' }
+  if (st === 'ativa') return { label: 'Ativo', cls: 'bg-emerald-50 text-emerald-700' }
+  return { label: 'Inativo', cls: 'bg-muted text-muted-foreground' }
+}
+
 function fmtPhone(t?: string) {
   if (!t) return '-'
   const c = t.replace(/\D/g, '')
@@ -116,6 +126,7 @@ const SHEET_TABS = [
   { key: 'endereco', label: 'Endereço' },
   { key: 'contatos', label: 'Contatos' },
   { key: 'responsaveis', label: 'Responsáveis' },
+  { key: 'portal', label: 'Portal' },
 ]
 
 const MODAL_TABS = [
@@ -147,6 +158,11 @@ export default function ClientesPage() {
   const [assignUserId, setAssignUserId] = useState('')
   const [changingRespId, setChangingRespId] = useState<number | null>(null)
   const [changeUserId, setChangeUserId] = useState('')
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
+  const [showBulkModal, setShowBulkModal] = useState(false)
+  const [bulkAssigning, setBulkAssigning] = useState(false)
+  const [bulkMsg, setBulkMsg] = useState('')
+  const [bulkErr, setBulkErr] = useState('')
 
   const { data: clientes } = useQuery({
     queryKey: ['clientes'],
@@ -159,6 +175,7 @@ export default function ClientesPage() {
         ativo: c.ativo ?? c.active ?? true,
         certificate_expires_at: c.certificate_expires_at,
         departamento: c.departamento,
+        status: c.status || (c.ativo ?? c.active ?? true ? 'ativa' : 'inativa'),
       }))
     },
     staleTime: 60_000,
@@ -188,6 +205,13 @@ export default function ClientesPage() {
     staleTime: 5 * 60_000,
   })
 
+  const { data: portalUsers = [], refetch: refetchPortalUsers } = useQuery({
+    queryKey: ['portal-users', selectedId],
+    queryFn: () => (selectedId ? apiFetch<any[]>('/api/client-portal/admin/clientes/' + selectedId + '/usuarios') : Promise.resolve([])),
+    enabled: !!selectedId,
+    staleTime: 15_000,
+  })
+
   const openDetail = (id: number) => {
     setSelectedId(id)
     setSheetTab('geral')
@@ -196,7 +220,7 @@ export default function ClientesPage() {
   }
 
   const openNew = () => {
-    setForm({})
+    setForm({ status: 'ativa' })
     setCnaes([])
     setContatos([])
     setFormMsg('')
@@ -214,6 +238,7 @@ export default function ClientesPage() {
       cnpj: d.cnpj || '',
       nome_fantasia: d.nome_fantasia || '',
       regime: d.regime || '',
+      status: d.status || (d.active ?? d.ativo) ? 'ativa' : 'inativa',
       telefone: d.telefone || '',
       email: d.email || '',
       endereco_cep: d.endereco_cep || '',
@@ -272,8 +297,15 @@ export default function ClientesPage() {
         email: d.email || p.email || '',
       }))
       setCnaes(d.cnaes || [])
-    } catch {
-      alert('CNPJ não encontrado ou erro na consulta')
+      if (d.eh_filial) {
+        const c = String(d.cnpj_consultado || '').replace(/\D/g, '')
+        const fmt = c.length === 14 ? `${c.slice(0,2)}.${c.slice(2,5)}.${c.slice(5,8)}/${c.slice(8,12)}-${c.slice(12)}` : c
+        alert(`CNPJ informado é uma filial e não foi localizado na consulta pública.\n\nPreenchemos os dados usando a MATRIZ (${fmt || c}). Confira e ajuste o endereço/telefone da filial antes de salvar.`)
+      }
+    } catch (e: any) {
+      const msg = e?.message || ''
+      const detail = (e?.detail || e?.responseDetail || '')
+      alert(detail ? `Erro na consulta: ${detail}` : (msg && msg.includes('HTTP') ? 'CNPJ não encontrado ou serviço indisponível. Tente novamente em alguns segundos.' : 'CNPJ não encontrado ou erro na consulta'))
     }
     setCnpjLoading(false)
   }
@@ -322,6 +354,7 @@ export default function ClientesPage() {
         cnpj: form.cnpj,
         nome_fantasia: form.nome_fantasia || '',
         regime: form.regime || '',
+        status: form.status || 'ativa',
         telefone: form.telefone || '',
         email: form.email || '',
         endereco_cep: form.endereco_cep || '',
@@ -416,6 +449,38 @@ export default function ClientesPage() {
     } catch { alert('Erro ao atribuir responsável') }
   }
 
+  const assignBulk = async () => {
+    if (!assignDeptId || !assignUserId) return
+    setBulkAssigning(true)
+    setBulkErr('')
+    setBulkMsg('')
+    const t = getToken()
+    if (!t) { setBulkAssigning(false); return }
+    try {
+      const r = await fetch('/api/clientes/responsaveis/bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + t },
+        body: JSON.stringify({
+          cliente_ids: Array.from(selectedIds),
+          user_id: parseInt(assignUserId),
+          department_id: parseInt(assignDeptId),
+        }),
+      })
+      const d = await r.json().catch(() => ({}))
+      if (!r.ok) throw new Error(d.detail || `HTTP ${r.status}`)
+      setBulkMsg(`${d.aplicados || selectedIds.size} cliente(s) atribuído(s) com sucesso`)
+      setSelectedIds(new Set())
+      setShowBulkModal(false)
+      setAssignDeptId('')
+      setAssignUserId('')
+      qc.invalidateQueries({ queryKey: ['clientes'] })
+      qc.invalidateQueries({ queryKey: ['cliente'] })
+    } catch (e) {
+      setBulkErr(e instanceof Error ? e.message : 'Erro ao atribuir responsável')
+    }
+    setBulkAssigning(false)
+  }
+
   const changeResponsavel = async (respId: number) => {
     if (!changeUserId || !selectedId) return
     const t = getToken()
@@ -473,7 +538,7 @@ export default function ClientesPage() {
 
   const selectCls = 'h-9 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring'
 
-  return (<div className="flex h-full min-h-[calc(100vh-7rem)] gap-4">
+  return (<div className="flex h-full min-h-[calc(100dvh-7rem)] flex-col gap-4 md:flex-row">
       {/* ── Lista ── */}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -498,6 +563,39 @@ export default function ClientesPage() {
             className="w-full bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none" />
         </div>
 
+        {/* Seleção em lote */}
+        {selectedIds.size > 0 ? (
+          <div className="card-soft flex flex-wrap items-center gap-3 rounded-lg border border-[#0078d4]/40 bg-[#0078d4]/5 px-4 py-3">
+            <div className="text-sm font-medium text-[#0078d4]">
+              <CheckSquare className="mr-1.5 inline h-4 w-4" />
+              {selectedIds.size} selecionado(s)
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setShowBulkModal(true)}
+                className="inline-flex items-center gap-2 rounded-lg bg-[#0078d4] px-3.5 py-2 text-xs font-medium text-white transition-colors hover:bg-[#0078d4]/80">
+                <UserCog className="h-4 w-4" />
+                Atribuir responsável
+              </button>
+              <button
+                onClick={() => setSelectedIds(new Set())}
+                className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-3.5 py-2 text-xs font-medium text-foreground transition-colors hover:bg-muted">
+                <X className="h-4 w-4 text-muted-foreground" />
+                Limpar
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex items-center justify-end">
+            <button
+              onClick={() => setSelectedIds(new Set(filtered.map(c => c.id)))}
+              className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-3.5 py-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+              <CheckSquare className="h-4 w-4" />
+              Selecionar todos
+            </button>
+          </div>
+        )}
+
         <div className="card-soft flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg bg-card">
           {!clientes ? (
             <div className="py-10 text-center text-sm text-muted-foreground">Carregando clientes…</div>
@@ -506,8 +604,21 @@ export default function ClientesPage() {
           ) : (
             <div className="grid gap-px overflow-y-auto bg-border/40 sm:grid-cols-2 lg:grid-cols-3">
               {filtered.map(c => (
-                <button key={c.id} onClick={() => openDetail(c.id)}
-                  className={`group flex items-center gap-3 bg-card p-4 text-left transition-colors hover:bg-muted/40 ${selectedId === c.id ? 'bg-[#0078d4]/5' : ''}`}>
+                <div key={c.id}
+                  onClick={() => openDetail(c.id)}
+                  className={`group flex cursor-pointer items-center gap-3 bg-card p-4 text-left transition-colors hover:bg-muted/40 ${selectedId === c.id ? 'bg-[#0078d4]/5' : ''} ${selectedIds.has(c.id) ? 'ring-1 ring-inset ring-[#0078d4]/60' : ''}`}>
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.has(c.id)}
+                    onClick={e => e.stopPropagation()}
+                    onChange={e => {
+                      const next = new Set(selectedIds)
+                      if (e.target.checked) next.add(c.id)
+                      else next.delete(c.id)
+                      setSelectedIds(next)
+                    }}
+                    className="h-4 w-4 shrink-0 rounded accent-[#0078d4]"
+                  />
                   <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[#0078d4]/10">
                     <Users className="h-5 w-5 text-[#0078d4]" />
                   </div>
@@ -520,10 +631,10 @@ export default function ClientesPage() {
                       </p>
                     )}
                   </div>
-                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${c.ativo ? 'bg-emerald-50 text-emerald-700' : 'bg-muted text-muted-foreground'}`}>
-                    {c.ativo ? 'Ativo' : 'Inativo'}
+                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${statusBadge(c.status, c.ativo).cls}`}>
+                    {statusBadge(c.status, c.ativo).label}
                   </span>
-                </button>
+                </div>
               ))}
             </div>
           )}
@@ -532,7 +643,7 @@ export default function ClientesPage() {
 
       {/* ── Painel lateral ── */}
       {selectedId && (
-        <div className="card-soft flex w-[400px] shrink-0 flex-col overflow-hidden rounded-lg bg-card">
+        <div className="card-soft flex w-full shrink-0 flex-col overflow-hidden rounded-lg bg-card sm:w-[400px]">
           <div className="flex items-center justify-between border-b border-border/60 px-4 py-3">
             <h3 className="truncate text-sm font-semibold text-foreground">{detail?.name || detail?.nome || 'Cliente'}</h3>
             <div className="flex items-center gap-1">
@@ -565,8 +676,8 @@ export default function ClientesPage() {
                   </div>
                   <h4 className="mt-2 text-base font-semibold text-foreground">{detail?.name || detail?.nome}</h4>
                   {detail?.nome_fantasia && <p className="text-xs text-muted-foreground">{detail.nome_fantasia}</p>}
-                  <span className={`mt-2 inline-block rounded-full px-2 py-0.5 text-[10px] font-medium ${detail?.active ?? detail?.ativo ? 'bg-emerald-50 text-emerald-700' : 'bg-muted text-muted-foreground'}`}>
-                    {(detail?.active ?? detail?.ativo) ? 'Ativo' : 'Inativo'}
+                  <span className={`mt-2 inline-block rounded-full px-2 py-0.5 text-[10px] font-medium ${statusBadge(detail?.status, detail?.active ?? detail?.ativo).cls}`}>
+                    {statusBadge(detail?.status, detail?.active ?? detail?.ativo).label}
                   </span>
                 </div>
 
@@ -772,6 +883,13 @@ export default function ClientesPage() {
                 </div>
               </div>
             )}
+            {sheetTab === 'portal' && (
+              <PortalAcessoTab
+                clienteId={selectedId}
+                users={portalUsers}
+                onRefresh={refetchPortalUsers}
+              />
+            )}
           </div>
         </div>
       )}
@@ -825,6 +943,15 @@ export default function ClientesPage() {
                       <select value={form.regime || ''} onChange={e => updateForm('regime', e.target.value)} className={selectCls}>
                         <option value="">Selecione…</option>
                         {REGIMES.map(r => <option key={r} value={r}>{r}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-muted-foreground">Status</label>
+                      <select value={form.status || 'ativa'} onChange={e => updateForm('status', e.target.value)} className={selectCls}>
+                        <option value="ativa">Ativa</option>
+                        <option value="inativa">Inativa</option>
+                        <option value="prospect">Prospect</option>
+                        <option value="lead">Lead</option>
                       </select>
                     </div>
                     <Inp label="Telefone" field="telefone" placeholder="(00) 00000-0000" />
@@ -1020,6 +1147,223 @@ export default function ClientesPage() {
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* ── Modal Atribuir responsável (em lote) ── */}
+      {showBulkModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => !bulkAssigning && setShowBulkModal(false)}>
+          <div className="w-full max-w-md rounded-xl border border-border bg-card shadow-lg" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between border-b border-border/60 px-6 py-4">
+              <h3 className="text-sm font-semibold text-foreground">Atribuir responsável</h3>
+              <button onClick={() => setShowBulkModal(false)} className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-muted">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="space-y-4 p-6">
+              <p className="text-xs text-muted-foreground">
+                Os <b>{selectedIds.size}</b> cliente(s) selecionado(s) ficarão sob responsabilidade do colaborador no departamento escolhido.
+              </p>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-muted-foreground">Departamento</label>
+                <select value={assignDeptId} onChange={e => { setAssignDeptId(e.target.value); setAssignUserId('') }} className={selectCls}>
+                  <option value="">Selecione…</option>
+                  {(departments || []).map((d: Departamento) => (
+                    <option key={d.id} value={String(d.id)}>{d.nome}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-muted-foreground">Responsável</label>
+                <select value={assignUserId} onChange={e => setAssignUserId(e.target.value)} disabled={!assignDeptId} className={selectCls}>
+                  <option value="">Selecione…</option>
+                  {assignDeptId && (users || []).filter(u => u.departamento_id === parseInt(assignDeptId) || u.departamento_id === null).map((u: Usuario) => (
+                    <option key={u.id} value={String(u.id)}>{u.display_name}</option>
+                  ))}
+                </select>
+              </div>
+              {bulkErr && <div className="text-xs text-rose-600">{bulkErr}</div>}
+              {bulkMsg && <div className="text-xs text-emerald-600">{bulkMsg}</div>}
+            </div>
+            <div className="flex items-center justify-end gap-3 border-t border-border/60 px-6 py-4">
+              <button onClick={() => setShowBulkModal(false)} disabled={bulkAssigning}
+                className="rounded-lg border border-border px-4 py-2 text-xs text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40">
+                Cancelar
+              </button>
+              <button
+                onClick={assignBulk}
+                disabled={bulkAssigning || !assignDeptId || !assignUserId}
+                className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-xs font-medium text-primary-foreground shadow-md shadow-primary/30 transition-colors hover:bg-primary/90 disabled:opacity-40">
+                {bulkAssigning && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                {bulkAssigning ? 'Atribuindo…' : 'Atribuir'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+const GRUPOS_PORTAL = [
+  { slug: 'fiscal', label: 'Fiscal' },
+  { slug: 'contabil', label: 'Contábil' },
+  { slug: 'rh', label: 'RH / DP' },
+  { slug: 'financeiro', label: 'Financeiro' },
+  { slug: 'outros', label: 'Outros' },
+]
+
+function PortalAcessoTab({ clienteId, users, onRefresh }: {
+  clienteId: number
+  users: any[]
+  onRefresh: () => void
+}) {
+  const [novo, setNovo] = useState(false)
+  const [nome, setNome] = useState('')
+  const [email, setEmail] = useState('')
+  const [senha, setSenha] = useState('')
+  const [acessos, setAcessos] = useState<string[]>([])
+  const [editId, setEditId] = useState<number | null>(null)
+  const [editarAcessos, setEditarAcessos] = useState<string[]>([])
+  const [msg, setMsg] = useState('')
+  const [err, setErr] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const req = async (method: string, url: string, body?: any) => {
+    const t = getToken()
+    const r = await fetch(url, { method, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + t }, body: body ? JSON.stringify(body) : undefined })
+    const d = await r.json().catch(() => ({}))
+    if (!r.ok) throw new Error(d.detail || `HTTP ${r.status}`)
+    return d
+  }
+
+  const salvarNovo = async () => {
+    setBusy(true); setErr(''); setMsg('')
+    try {
+      const d = await req('POST', `/api/client-portal/admin/clientes/${clienteId}/usuarios`, {
+        nome, email, senha: senha || undefined, tipos_acesso: acessos.length ? acessos : null,
+      })
+      setMsg(`Usuário criado! Senha temporária: ${d.senha_temporaria}`)
+      setNovo(false); setNome(''); setEmail(''); setSenha(''); setAcessos([])
+      onRefresh()
+    } catch (e) { setErr(e instanceof Error ? e.message : 'Erro ao criar') }
+    setBusy(false)
+  }
+
+  const alternarAtivo = async (u: any) => {
+    try { await req('PUT', `/api/client-portal/admin/clientes/${clienteId}/usuarios/${u.id}`, { ativo: !u.ativo }); onRefresh() } catch {}
+  }
+  const resetarSenha = async (u: any) => {
+    const nova = prompt('Nova senha temporária para ' + u.nome + ':')
+    if (!nova) return
+    try { await req('PUT', `/api/client-portal/admin/clientes/${clienteId}/usuarios/${u.id}`, { senha: nova }); setMsg('Senha redefinida') } catch (e) { setErr(e instanceof Error ? e.message : 'erro') }
+  }
+  const salvarAcessos = async () => {
+    if (editId == null) return
+    try { await req('PUT', `/api/client-portal/admin/clientes/${clienteId}/usuarios/${editId}`, { tipos_acesso: editarAcessos.length ? editarAcessos : null }); setEditId(null); onRefresh() } catch (e) { setErr(e instanceof Error ? e.message : 'erro') }
+  }
+
+  const toggle = (arr: string[], v: string, set: (a: string[]) => void) => set(arr.includes(v) ? arr.filter(x => x !== v) : [...arr, v])
+
+  const inputCls = 'h-9 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring'
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-sm font-semibold text-foreground">Acessos ao portal</h3>
+          <p className="text-[11px] text-muted-foreground">Quem acessa e quais documentos vê</p>
+        </div>
+        <button onClick={() => { setNovo(true); setErr(''); setMsg('') }}
+          className="inline-flex items-center gap-1 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90">
+          <Plus className="h-3.5 w-3.5" /> Novo acesso
+        </button>
+      </div>
+
+      {msg && <div className="rounded-lg border border-emerald-500/30 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">{msg}</div>}
+      {err && <div className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-700">{err}</div>}
+
+      {/* Form novo */}
+      {novo && (
+        <div className="space-y-2 rounded-lg border border-border/60 bg-muted/20 p-3">
+          <input value={nome} onChange={e => setNome(e.target.value)} placeholder="Nome do usuário" className={inputCls} />
+          <input value={email} onChange={e => setEmail(e.target.value)} placeholder="E-mail (login do portal)" className={inputCls} />
+          <input value={senha} onChange={e => setSenha(e.target.value)} placeholder="Senha (deixe vazio p/ gerar automática)" className={inputCls} />
+          <div>
+            <p className="mb-1 text-[11px] font-medium text-muted-foreground">Acesso a quais documentos?</p>
+            <div className="flex flex-wrap gap-1.5">
+              {GRUPOS_PORTAL.map(g => (
+                <button key={g.slug} onClick={() => toggle(acessos, g.slug, setAcessos)}
+                  className={`rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors ${acessos.includes(g.slug) ? 'bg-[#0078d4] text-white' : 'bg-muted text-muted-foreground hover:text-foreground'}`}>
+                  {g.label}
+                </button>
+              ))}
+            </div>
+            <p className="mt-1 text-[10px] text-muted-foreground">Vazio = acesso total.</p>
+          </div>
+          <div className="flex gap-2">
+            <button onClick={salvarNovo} disabled={busy || !nome.trim() || !email.trim()}
+              className="flex-1 rounded-lg bg-primary px-3 py-2 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-40">
+              {busy ? 'Salvando…' : 'Criar usuário'}
+            </button>
+            <button onClick={() => setNovo(false)} className="rounded-lg border border-border px-3 py-2 text-xs text-muted-foreground hover:text-foreground">Cancelar</button>
+          </div>
+        </div>
+      )}
+
+      {/* Lista */}
+      {users.length === 0 ? (
+        <p className="rounded-lg border border-dashed border-border py-6 text-center text-xs text-muted-foreground">
+          Nenhum usuário do portal para este cliente.
+        </p>
+      ) : (
+        <div className="space-y-2">
+          {users.map(u => {
+            const temas = (() => { try { const v = JSON.parse(u.tipos_acesso || 'null'); return Array.isArray(v) ? v : null } catch { return null } })()
+            return (
+              <div key={u.id} className="rounded-lg border border-border/60 bg-muted/20 p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-foreground">{u.nome}</p>
+                    <p className="truncate text-xs text-muted-foreground">{u.email}</p>
+                  </div>
+                  <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${u.ativo ? 'bg-emerald-50 text-emerald-600' : 'bg-muted text-muted-foreground'}`}>
+                    {u.ativo ? 'Ativo' : 'Inativo'}
+                  </span>
+                </div>
+                <div className="mt-2">
+                  {editId === u.id ? (
+                    <div className="space-y-2">
+                      <p className="text-[11px] font-medium text-muted-foreground">Acesso a quais documentos?</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {GRUPOS_PORTAL.map(g => (
+                          <button key={g.slug} onClick={() => toggle(editarAcessos, g.slug, setEditarAcessos)}
+                            className={`rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors ${editarAcessos.includes(g.slug) ? 'bg-[#0078d4] text-white' : 'bg-muted text-muted-foreground hover:text-foreground'}`}>
+                            {g.label}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="flex gap-2">
+                        <button onClick={salvarAcessos} className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90">Salvar acessos</button>
+                        <button onClick={() => setEditId(null)} className="rounded-md border border-border px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground">Cancelar</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">
+                      {temas === null ? <span className="font-medium text-emerald-600">Acesso total</span> : `Acesso: ${temas.map(t => GRUPOS_PORTAL.find(g => g.slug === t)?.label || t).join(', ')}`}
+                    </p>
+                  )}
+                </div>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <button onClick={() => { setEditId(u.id); setEditarAcessos(temas || []) }} className="rounded border border-[#0078d4]/30 px-2 py-1 text-[11px] text-[#0078d4] hover:bg-[#0078d4]/10">Editar acessos</button>
+                  <button onClick={() => resetarSenha(u)} className="rounded border border-border px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground">Redefinir senha</button>
+                  <button onClick={() => alternarAtivo(u)} className="rounded border border-border px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground">
+                    {u.ativo ? 'Desativar' : 'Reativar'}
+                  </button>
+                </div>
+              </div>
+            )
+          })}
         </div>
       )}
     </div>

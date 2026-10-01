@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
-import { MonitorSmartphone, ChevronDown, Copy, Check } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import { MonitorSmartphone, ChevronDown, Copy, Check, Wrench, Search, X } from 'lucide-react'
 import type { Agente } from '../types'
 import { editarAgente, excluirAgente, instalarCertificado, listAgenteTarefas, listAgentes, listClientesCert } from '../api'
 import { SortableTh, sortItems, useSortable } from '@/components/ui/sortable'
@@ -19,7 +19,10 @@ const TASK_STATUS: Record<string, { label: string; cls: string }> = {
   cancelled: { label: 'Cancelada', cls: 'bg-muted text-muted-foreground' },
 }
 
-const PS_COMMAND = "powershell -Command \"& { Invoke-Expression (Invoke-WebRequest -UseBasicParsing -Uri 'http://72.60.11.156:3003/downloads/agent/install').Content }\""
+function getPsCommand(): string {
+  const base = window.location.origin
+  return `powershell -Command "& { Invoke-Expression (Invoke-WebRequest -UseBasicParsing -Uri '${base}/downloads/agent/install').Content }"`
+}
 
 function fmtHeartbeat(d: string | null) {
   if (!d) return 'Nunca'
@@ -47,6 +50,7 @@ export default function AgentesTab() {
   const [showGuide, setShowGuide] = useState(false)
   const [copied, setCopied] = useState(false)
   const [installAgentId, setInstallAgentId] = useState<number | null>(null)
+  const [buscaCert, setBuscaCert] = useState('')
   const [editAgent, setEditAgent] = useState<Agente | null>(null)
   const [error, setError] = useState('')
 
@@ -74,7 +78,7 @@ export default function AgentesTab() {
 
   const copyCmd = async () => {
     try {
-      await navigator.clipboard.writeText(PS_COMMAND)
+      await navigator.clipboard.writeText(getPsCommand())
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     } catch {
@@ -89,11 +93,29 @@ export default function AgentesTab() {
       const r = await instalarCertificado(installAgentId, clientId)
       alert(`Tarefa de instalação criada (#${r.task_id}). O agente irá baixar e instalar o certificado automaticamente.`)
       setInstallAgentId(null)
+      setBuscaCert('')
       invalidate()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erro ao criar tarefa')
     }
   }
+
+  // Filtro de clientes no modal de instalação (nome ou CNPJ, ignora acentos)
+  const clientesCertFiltrados = useMemo(() => {
+    const normal = (s: string) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    const q = normal(buscaCert.trim())
+    if (!q) return clientes
+    const qDigits = q.replace(/\D/g, '')
+    const isCnpjSearch = /^[\d./-]*$/.test(q) && qDigits.length >= 3
+    return clientes.filter(c => {
+      if (isCnpjSearch) {
+        const cnpjDigits = (c.cnpj || '').replace(/\D/g, '')
+        return cnpjDigits.includes(qDigits)
+      }
+      const nome = normal(c.name || c.nome || '')
+      return nome.includes(q)
+    })
+  }, [clientes, buscaCert])
 
   const handleDelete = async (a: Agente) => {
     if (!confirm(`Excluir o agente ${a.machine_name}?`)) return
@@ -112,12 +134,24 @@ export default function AgentesTab() {
           <span className="font-semibold text-foreground">{ativos}</span> ativos de {agentes.length} ·{' '}
           <span className="font-semibold text-emerald-600">{online}</span> online
         </div>
-        <button
-          onClick={() => setShowGuide(!showGuide)}
-          className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-3.5 py-2 text-xs font-medium text-foreground transition-colors hover:bg-muted"
-        >
-          {showGuide ? 'Ocultar' : 'Guia PowerShell'}
-        </button>
+        <div className="flex items-center gap-2">
+          <a
+            href={`${window.location.origin}/downloads/agent/fix-server`}
+            target="_blank"
+            rel="noreferrer"
+            title="Para PCs instalados antes da migração (apontavam para a porta 3003 do V3)"
+            className="inline-flex items-center gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3.5 py-2 text-xs font-medium text-amber-600 transition-colors hover:bg-amber-500/20 dark:text-amber-400"
+          >
+            <Wrench className="h-4 w-4" />
+            Corrigir servidor de PCs antigos
+          </a>
+          <button
+            onClick={() => setShowGuide(!showGuide)}
+            className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-3.5 py-2 text-xs font-medium text-foreground transition-colors hover:bg-muted"
+          >
+            {showGuide ? 'Ocultar' : 'Guia PowerShell'}
+          </button>
+        </div>
       </div>
 
       {showGuide && (
@@ -125,15 +159,24 @@ export default function AgentesTab() {
           <p className="mb-2 text-xs text-muted-foreground">
             Execute o PowerShell como <span className="font-semibold text-foreground">Administrador</span> na máquina Windows:
           </p>
-          <div className="flex items-center gap-2">
-            <code className="flex-1 overflow-x-auto rounded-lg bg-muted px-3 py-2 font-mono text-xs text-foreground">{PS_COMMAND}</code>
+          <div className="flex items-start gap-2">
+            <code className="flex-1 overflow-x-auto whitespace-pre-wrap rounded-lg bg-muted px-3 py-2 font-mono text-xs text-foreground">{getPsCommand()}</code>
             <button
               onClick={copyCmd}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-[#0078d4]/40 bg-[#0078d4]/10 px-3 py-2 text-xs font-medium text-[#0078d4] transition-colors hover:bg-[#0078d4]/20"
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-[#0078d4]/40 bg-[#0078d4]/10 px-3 py-2 text-xs font-medium text-[#0078d4] transition-colors hover:bg-[#0078d4]/20"
             >
               {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
               {copied ? 'Copiado!' : 'Copiar'}
             </button>
+          </div>
+          <div className="mt-3 rounded-lg border border-border/60 bg-muted/20 p-3 text-[11px] leading-relaxed text-muted-foreground">
+            <p><span className="font-semibold text-foreground">O que este comando faz:</span></p>
+            <ul className="mt-1 list-disc space-y-0.5 pl-4">
+              <li>Baixa e instala a versão mais recente do agente</li>
+              <li>Preserva o <span className="font-mono">machine_id</span> existente (não cria agente duplicado)</li>
+              <li>Corrige a URL do servidor para <span className="font-mono">{window.location.origin}</span> (PCs antigos que apontavam para a porta 3003 do V3)</li>
+              <li>Recria a tarefa agendada e reinicia o agente</li>
+            </ul>
           </div>
         </div>
       )}
@@ -239,8 +282,25 @@ export default function AgentesTab() {
                 Escolha o cliente — o agente baixará o certificado e instalará automaticamente.
               </p>
             </div>
-            <div className="max-h-[60vh] overflow-y-auto p-4">
-              {clientes.map(c => (
+            <div className="border-b border-border/40 p-4">
+              <div className="flex items-center gap-2 rounded-lg border border-input bg-background px-3">
+                <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
+                <input
+                  value={buscaCert}
+                  onChange={e => setBuscaCert(e.target.value)}
+                  placeholder="Buscar cliente por nome ou CNPJ…"
+                  autoFocus
+                  className="h-9 w-full bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
+                />
+                {buscaCert && (
+                  <button onClick={() => setBuscaCert('')} className="rounded p-1 text-muted-foreground hover:text-foreground" title="Limpar">
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+            </div>
+            <div className="max-h-[50vh] overflow-y-auto p-4">
+              {clientesCertFiltrados.map(c => (
                 <div key={c.id} className="flex items-center justify-between rounded-lg px-3 py-2 transition-colors hover:bg-muted/30">
                   <div>
                     <p className="text-sm text-foreground">{c.name || c.nome || `Cliente #${c.id}`}</p>
@@ -254,6 +314,9 @@ export default function AgentesTab() {
                   </button>
                 </div>
               ))}
+              {clientesCertFiltrados.length === 0 && (
+                <p className="py-8 text-center text-xs text-muted-foreground">Nenhum cliente encontrado.</p>
+              )}
             </div>
             {error && <div className="px-6 pb-3 text-xs text-rose-600">{error}</div>}
             <div className="flex justify-end border-t border-border/60 px-6 py-4">

@@ -31,9 +31,10 @@ export const STEP_TYPE_COLORS: Record<string, string> = {
 export const KANBAN_COLUMNS = [
   { key: 'Pendente', label: 'Pendente', status: 'Pendente' },
   { key: 'em_execucao', label: 'Em Andamento', status: 'em_execucao' },
-  { key: 'Aguardando_Decisao', label: 'Aguardando Decisão', status: 'aguardando_decisao' },
-  { key: 'Aguardando_Cliente', label: 'Aguardando Cliente', status: 'aguardando_cliente' },
+  { key: 'Aguardando_Decisao', label: 'Aguardando Decisão', status: 'Aguardando_Decisao' },
+  { key: 'Aguardando_Cliente', label: 'Aguardando Cliente', status: 'Aguardando_Cliente' },
   { key: 'Concluida', label: 'Finalizado', status: 'Concluida' },
+  { key: 'Cancelada', label: 'Cancelado', status: 'Cancelada' },
 ]
 
 export const STATUS_FILTERS = [
@@ -45,7 +46,7 @@ export const STATUS_FILTERS = [
   { key: 'Cancelada', label: 'Cancelado' },
 ]
 
-export const RECORRENCIA_OPTIONS = ['semanal', 'mensal', 'trimestral', 'anual']
+export const RECORRENCIA_OPTIONS = ['diaria', 'semanal', 'mensal', 'trimestral', 'semestral', 'anual']
 export const CATEGORIAS = ['Fiscal', 'DP', 'Contábil', 'Legal', 'Geral']
 export const PRIORIDADES = ['Baixa', 'Média', 'Alta']
 export const VISIBILIDADE_OPTIONS = ['público', 'privado']
@@ -184,4 +185,46 @@ export function getDisplayName(): string {
     // ignore
   }
   return 'Usuário'
+}
+
+export function pedirAnexo(): Promise<File | null> {
+  return new Promise(resolve => {
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = '.pdf,.xls,.xlsx,.csv,.doc,.docx,.png,.jpg,.jpeg,.xml,.txt,.zip'
+    input.onchange = () => resolve(input.files?.[0] || null)
+    input.oncancel = () => resolve(null)
+    input.click()
+  })
+}
+
+/** Usuário logado a partir do token. */
+export function getMe(): { id: number; role: string } {
+  try {
+    const tok = JSON.parse(localStorage.getItem('nfse_token') || '{}').access_token
+    if (!tok) return { id: 0, role: '' }
+    const p = JSON.parse(atob(tok.split('.')[1]))
+    return { id: Number(p.sub) || 0, role: p.role || '' }
+  } catch {
+    return { id: 0, role: '' }
+  }
+}
+
+/** Pode concluir/alterar uma etapa: admin/super_admin ou o responsável da etapa.
+ *  Etapa sem responsável atribuído: apenas admin/super_admin ou o dono do processo. */
+export function podeConcluirEtapa(me: { id: number; role: string }, etapa: Etapa, processo: Processo): boolean {
+  if (me.role === 'administrador' || me.role === 'super_admin') return true
+  if (etapa.user_id && String(etapa.user_id) === String(me.id)) return true
+  if (!etapa.user_id && processo.user_id && String(processo.user_id) === String(me.id)) return true
+  return false
+}
+
+export function isAdminUser(me: { role: string }): boolean {
+  return me.role === 'administrador' || me.role === 'super_admin'
+}
+
+/** Pode excluir um processo: admin/super_admin ou o responsável do processo (processo.user_id). */
+export function podeExcluirProcesso(me: { id: number; role: string }, processo: Processo): boolean {
+  if (isAdminUser(me)) return true
+  return !!processo.user_id && String(processo.user_id) === String(me.id)
 }

@@ -1,20 +1,45 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
-import type { Processo, RecurrenciaMap, Template, Vinculo } from './types'
-import { listProcessos, listRecorrencias, listTemplates, createProcesso, deleteProcesso, encerrarRecorrencia, gerarRecorrentes, iniciarRecorrencia, updateProcesso, updateSituacao, listVinculos } from './api'
-import { useClientes, useDepartamentos } from './hooks/useShared'
+import { useEffect, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { apiFetch, openAuthedFile } from '@/lib/api'
+import type { AprovacaoPendente, Processo, RecurrenciaMap, Template, Vinculo } from './types'
+import { listProcessos, listRecorrencias, listTemplates, createProcesso, deleteProcesso, encerrarRecorrencia, gerarRecorrentes, iniciarRecorrencia, updateProcesso, updateSituacao, listVinculos, uploadProcessoAnexo, listAprovacoesPendentes, aprovarEtapa, reprovarEtapa, solicitarAprovacao } from './api'
+import { useClientesOperacionais, useDepartamentos } from './hooks/useShared'
 import {
   KANBAN_COLUMNS, PRIORIDADE_MAP, STATUS_FILTERS, STATUS_MAP,
   STEP_TYPE_COLORS, countCompleted, fmtDateBR, getCurrentStep, getDependencyNames,
-  getDisplayName, getKanbanStatus, hasIncompleteSubtasks, hasUnmetDependencies, safeEtapas,
+  getDisplayName, getKanbanStatus, getMe, hasIncompleteSubtasks, hasUnmetDependencies,
+  safeEtapas, pedirAnexo,
 } from './helpers'
 import TemplateModal from './components/TemplateModal'
 import InstanceModal from './components/InstanceModal'
-import KanbanPorProcesso from './components/KanbanPorProcesso'
 import ProcessoDetail from './components/ProcessoDetail'
 import { SortableTh, sortItems, useSortable } from '@/components/ui/sortable'
+import {
+  DndContext, PointerSensor, TouchSensor, closestCorners, useDroppable, useDraggable,
+  useSensor, useSensors, type DragEndEvent,
+} from '@dnd-kit/core'
+import { CSS } from '@dnd-kit/utilities'
+import { FileCheck2, FileWarning } from 'lucide-react'
 
-type SubTab = 'modelos' | 'instancias' | 'kanban' | 'recorrencias' | 'vinculados'
+type SubTab = 'modelos' | 'instancias' | 'kanban' | 'aprovacoes' | 'recorrencias' | 'vinculados'
+
+/** Indicador de documento na tabela de instâncias: verde (anexado), âmbar (pendente). */
+function renderDocIndicador(p: Processo) {
+  const etapas = safeEtapas(p.etapas)
+  const exigem = etapas.filter(e => e.exige_documento)
+  if (exigem.length === 0) return <span className="text-xs text-muted-foreground">—</span>
+  const pendentes = exigem.filter(e => e.isCompleted && !e.anexo)
+  const atuais = exigem.filter(e => !e.isCompleted)
+  const algumAnexo = exigem.some(e => e.anexo)
+  if (pendentes.length > 0) {
+    return <span title="Etapa concluída sem documento anexado" className="inline-flex items-center gap-1 rounded bg-rose-500/15 px-1.5 py-0.5 text-[10px] font-medium text-rose-600"><FileWarning className="h-3 w-3" /> falta anexo</span>
+  }
+  if (atuais.length > 0) {
+    return <span title="A etapa atual exige documento ao concluir" className="inline-flex items-center gap-1 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-600"><FileWarning className="h-3 w-3" /> exige doc</span>
+  }
+  return <span title="Documento anexado" className="inline-flex items-center gap-1 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-medium text-emerald-600"><FileCheck2 className="h-3 w-3" /> {algumAnexo ? 'anexado' : 'ok'}</span>
+}
 
 function StatusPill({ status }: { status: string }) {
   const c = STATUS_MAP[status]?.color || '#535353'
@@ -28,17 +53,57 @@ function StatusPill({ status }: { status: string }) {
   )
 }
 
+const REC_LABEL: Record<string, string> = {
+  diaria: 'Diária', semanal: 'Semanal', mensal: 'Mensal',
+  trimestral: 'Trimestral', semestral: 'Semestral', anual: 'Anual',
+}
+const DIAS_SEMANA = ['Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado', 'Domingo']
+function fmtRecorrencia(t: { recorrencia_padrao?: string; recorrencia_dia_mes?: number | null; recorrencia_dia_semana?: number | null }) {
+  const f = (t.recorrencia_padrao || 'mensal').toLowerCase()
+  const label = REC_LABEL[f] || f
+  if (f === 'semanal') {
+    const d = t.recorrencia_dia_semana ?? 0
+    return `${label} · ${DIAS_SEMANA[d] ?? 'Segunda'}`
+  }
+  if (f === 'diaria') return label
+  return `${label} · dia ${t.recorrencia_dia_mes ?? 1}`
+}
+
 export default function ProcessosPage() {
   const qc = useQueryClient()
+  const navigate = useNavigate()
   const [subTab, setSubTab] = useState<SubTab>('modelos')
   const [statusFilter, setStatusFilter] = useState('')
+  const [meusProcessos, setMeusProcessos] = useState(false)
+
+  // Filtros avançados (instâncias) — para admin/líder/super
+  const [busca, setBusca] = useState('')
+  const [filtroResponsavel, setFiltroResponsavel] = useState('')
+  const [filtroCliente, setFiltroCliente] = useState('')
+  const [filtroDepartamento, setFiltroDepartamento] = useState('')
+  const [filtroPrioridade, setFiltroPrioridade] = useState('')
 
   const [showTemplateModal, setShowTemplateModal] = useState(false)
   const [editingTemplate, setEditingTemplate] = useState<Template | null>(null)
   const [showInstanceModal, setShowInstanceModal] = useState(false)
   const [selectedProcesso, setSelectedProcesso] = useState<Processo | null>(null)
-  const [kanbanProcesso, setKanbanProcesso] = useState<Processo | null>(null)
+  const detailRef = useRef<HTMLDivElement>(null)
+
+  // Ao abrir o detalhe de qualquer instância, rola até o painel (que fica no topo)
+  useEffect(() => {
+    if (selectedProcesso && detailRef.current) {
+      detailRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }
+  }, [selectedProcesso])
   const [editingSituacao, setEditingSituacao] = useState<{ id: number; situacao: string } | null>(null)
+  const me = getMe()
+  const isAdmin = me.role === 'administrador' || me.role === 'super_admin'
+  const isGestor = isAdmin || me.role === 'lider'
+  const temFiltroInst = busca.trim() !== '' || filtroResponsavel !== '' || filtroCliente !== '' ||
+    filtroDepartamento !== '' || filtroPrioridade !== ''
+  const limparFiltrosInst = () => {
+    setBusca(''); setFiltroResponsavel(''); setFiltroCliente(''); setFiltroDepartamento(''); setFiltroPrioridade('')
+  }
 
   // Kanban flow (lote)
   const [showFlowModal, setShowFlowModal] = useState(false)
@@ -50,11 +115,18 @@ export default function ProcessosPage() {
   const [recurrenciaClientes, setRecurrenciaClientes] = useState<number[]>([])
 
   const { data: templates = [] } = useQuery({ queryKey: ['processo-templates'], queryFn: listTemplates })
-  const { data: processos = [] } = useQuery({ queryKey: ['processos'], queryFn: listProcessos })
+  const { data: processos = [] } = useQuery({ queryKey: ['processos', meusProcessos], queryFn: () => listProcessos(meusProcessos || undefined) })
   const { data: recorrencias = {} as RecurrenciaMap } = useQuery({ queryKey: ['processo-recorrencias'], queryFn: listRecorrencias })
   const { data: vinculos = { vinculos: [] as Vinculo[] } } = useQuery({ queryKey: ['processo-vinculos'], queryFn: listVinculos })
   const { data: departamentos = [] } = useDepartamentos()
-  const { data: clientes = [] } = useClientes()
+  const { data: clientes = [] } = useClientesOperacionais()
+  const { data: usuarios = [] } = useQuery({
+    queryKey: ['processos-usuarios'],
+    queryFn: () => apiFetch<any[]>('/api/usuarios?limit=500'),
+    staleTime: 5 * 60_000,
+  })
+  const usersMap = Object.fromEntries(usuarios.map((u: any) => [String(u.id), u]))
+  const deptMap = Object.fromEntries(departamentos.map((d: any) => [String(d.id), d]))
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ['processos'] })
@@ -125,6 +197,39 @@ export default function ProcessosPage() {
       return
     }
 
+    // Exige documento/relatório? Se marcado no modelo, precisa anexar antes de fechar.
+    if (current.exige_documento && !current.anexo) {
+      const file = await pedirAnexo()
+      if (!file) return
+      try {
+        const anexo = await uploadProcessoAnexo(processo.id, file)
+        current.anexo = anexo
+      } catch (e) {
+        alert('Falha ao anexar o documento: ' + (e instanceof Error ? e.message : 'erro'))
+        return
+      }
+    }
+    // Checklist de documentos exigidos
+    const docs = current.documentos_exigidos || []
+    if (docs.length > 0) {
+      const itens = Object.fromEntries((current.checklist || []).map(i => [String(i.id), i]))
+      if (docs.some(d => !(itens[String(d.id)]?.anexo))) {
+        alert('Anexe todos os documentos exigidos antes de concluir.')
+        return
+      }
+    }
+    // Etapa que exige aprovação: envia para aprovação (não conclui direto)
+    if (current.exige_aprovacao) {
+      try {
+        await solicitarAprovacao(processo.id, current.id)
+        invalidate()
+        alert('Etapa enviada para aprovação.')
+      } catch (e) {
+        alert('Falha ao enviar para aprovação: ' + (e instanceof Error ? e.message : 'erro'))
+      }
+      return
+    }
+
     current.isCompleted = true
     current.completedBy = getDisplayName()
     current.completedAt = new Date().toISOString()
@@ -147,7 +252,14 @@ export default function ProcessosPage() {
     const newStatus = isFinished ? 'Concluida' : 'em_execucao'
     const newEtapaAtual = isFinished ? current.title : (nextStep?.title || current.title)
 
-    await mutUpdate.mutateAsync({ id: processo.id, payload: { etapas, status: newStatus, etapa_atual: newEtapaAtual } })
+    try {
+      await mutUpdate.mutateAsync({ id: processo.id, payload: { etapas, status: newStatus, etapa_atual: newEtapaAtual } })
+      // Atualiza em tempo real o painel expandido
+      setSelectedProcesso(prev => (prev && prev.id === processo.id ? { ...prev, etapas, status: newStatus, etapa_atual: newEtapaAtual } : prev))
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Erro ao concluir etapa')
+      return
+    }
     if (current.notificar_todos) {
       alert('Notificações enviadas para todos os usuários.')
     }
@@ -158,10 +270,44 @@ export default function ProcessosPage() {
     const step = etapas.find(e => e.id === stepId)
     if (!step || !step.subtasks) return
     step.subtasks = step.subtasks.map(st => (st.id === subtaskId ? { ...st, isCompleted: !st.isCompleted } : st))
-    await mutUpdate.mutateAsync({ id: processo.id, payload: { etapas } })
+    try {
+      await mutUpdate.mutateAsync({ id: processo.id, payload: { etapas } })
+      // Atualiza em tempo real o painel expandido
+      setSelectedProcesso(prev => (prev && prev.id === processo.id ? { ...prev, etapas } : prev))
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Erro ao atualizar subtarefa')
+    }
   }
 
-  const filteredProcessos = statusFilter ? processos.filter(p => p.status === statusFilter) : processos
+  const anexarEtapa = async (stepId: string) => {
+    const file = await pedirAnexo()
+    if (!file) return
+    const etapas = safeEtapas(selectedProcesso?.etapas || []).map(e => ({ ...e }))
+    const step = etapas.find(e => e.id === stepId)
+    if (!step) return
+    try {
+      const anexo = await uploadProcessoAnexo(selectedProcesso!.id, file)
+      step.anexo = anexo
+      await mutUpdate.mutateAsync({ id: selectedProcesso!.id, payload: { etapas } })
+      setSelectedProcesso(prev => (prev ? { ...prev, etapas } : prev))
+    } catch (e) {
+      alert('Falha ao anexar o documento: ' + (e instanceof Error ? e.message : 'erro'))
+    }
+  }
+
+  const filteredProcessos = processos.filter(p => {
+    if (statusFilter && p.status !== statusFilter) return false
+    if (busca.trim()) {
+      const b = busca.trim().toLowerCase()
+      const hay = [p.titulo || '', p.cliente_nome || '', p.etapa_atual || ''].join(' ').toLowerCase()
+      if (!hay.includes(b)) return false
+    }
+    if (filtroResponsavel && String((p as any).user_id ?? '') !== filtroResponsavel) return false
+    if (filtroCliente && String((p as any).cliente_id ?? '') !== filtroCliente) return false
+    if (filtroDepartamento && String((p as any).template_departamento_id ?? '') !== filtroDepartamento) return false
+    if (filtroPrioridade && (p.prioridade || '') !== filtroPrioridade) return false
+    return true
+  })
   const sTemplates = useSortable('titulo')
   const sProcessos = useSortable('titulo')
   const sRec = useSortable('titulo')
@@ -196,7 +342,7 @@ export default function ProcessosPage() {
           <h1 className="text-2xl font-bold tracking-tight text-foreground">Processos</h1>
           <p className="mt-1 text-sm text-muted-foreground">Modelos, instancias, fluxos de trabalho e recorrencias</p>
         </div>
-        {subTab === 'modelos' && (
+        {subTab === 'modelos' && isAdmin && (
           <button
             onClick={() => { setEditingTemplate(null); setShowTemplateModal(true) }}
             className="inline-flex items-center gap-2 rounded-lg bg-primary px-3.5 py-2 text-xs font-medium text-primary-foreground shadow-md shadow-primary/30 transition-colors hover:bg-primary/90"
@@ -235,7 +381,7 @@ export default function ProcessosPage() {
 
       {/* Sub-tabs */}
       <div className="flex gap-1 border-b border-border/60">
-        {(['modelos', 'instancias', 'kanban', 'recorrencias', 'vinculados'] as const).map(tab => (
+        {(['modelos', 'instancias', 'kanban', 'aprovacoes', 'recorrencias', 'vinculados'] as const).map(tab => (
           <button
             key={tab}
             onClick={() => { setSubTab(tab); setSelectedProcesso(null); setEditingSituacao(null) }}
@@ -243,7 +389,7 @@ export default function ProcessosPage() {
               subTab === tab ? 'border-[#0078d4] text-[#0078d4]' : 'border-transparent text-muted-foreground hover:text-foreground'
             }`}
           >
-            {tab === 'modelos' ? 'Modelos' : tab === 'instancias' ? 'Instâncias' : tab === 'kanban' ? 'Kanban' : tab === 'recorrencias' ? 'Recorrências' : 'Vinculados'}
+            {tab === 'modelos' ? 'Modelos' : tab === 'instancias' ? 'Instâncias' : tab === 'kanban' ? 'Kanban' : tab === 'aprovacoes' ? 'Aprovações' : tab === 'recorrencias' ? 'Recorrências' : 'Vinculados'}
           </button>
         ))}
       </div>
@@ -269,41 +415,43 @@ export default function ProcessosPage() {
                   </thead>
                   <tbody>
                     {sortedTemplates.map(tmpl => (
-                      <tr key={tmpl.id} className="cursor-pointer border-t border-border/40 transition-colors hover:bg-muted/30" onClick={() => { setEditingTemplate(tmpl); setShowTemplateModal(true) }}>
+                      <tr key={tmpl.id} className={`border-t border-border/40 transition-colors ${isAdmin ? 'cursor-pointer hover:bg-muted/30' : ''}`} onClick={() => { if (isAdmin) { setEditingTemplate(tmpl); setShowTemplateModal(true) } }}>
                         <td className="px-4 py-3">{tmpl.titulo}</td>
                         <td className="px-4 py-3 text-muted-foreground">{tmpl.categoria || '-'}</td>
                         <td className="px-4 py-3 text-center text-muted-foreground">{safeEtapas(tmpl.etapas).length}</td>
                         <td className="px-4 py-3 text-center">
                           {tmpl.recorrente ? (
                             <span className="inline-flex items-center gap-1 text-xs font-medium text-[#0078d4]">
-                              <span>+</span> {tmpl.recorrencia_padrao || 'mensal'}
+                              <span>+</span> {fmtRecorrencia(tmpl)}
                             </span>
                           ) : (
                             <span className="text-xs text-muted-foreground">--</span>
                           )}
                         </td>
                         <td className="px-4 py-3 text-right">
-                          <button
-                            onClick={e => {
-                              e.stopPropagation()
-                              const body = {
-                                titulo: tmpl.titulo + ' (Cópia)',
-                                categoria: tmpl.categoria || '',
-                                departamento_id: tmpl.departamento_id,
-                                recorrente: !!tmpl.recorrente,
-                                recorrencia_padrao: tmpl.recorrencia_padrao || 'mensal',
-                                etapas: safeEtapas(tmpl.etapas),
-                              }
-                              fetch('/api/processo-templates', {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + (JSON.parse(localStorage.getItem('nfse_token') || '{}').access_token || '') },
-                                body: JSON.stringify(body),
-                              }).then(() => invalidate())
-                            }}
-                            className="rounded border border-amber-400/30 px-3 py-1 text-xs tracking-wider text-amber-500 transition-colors hover:bg-amber-400/10"
-                          >
-                            Duplicar
-                          </button>
+                          {isAdmin && (
+                            <button
+                              onClick={e => {
+                                e.stopPropagation()
+                                const body = {
+                                  titulo: tmpl.titulo + ' (Cópia)',
+                                  categoria: tmpl.categoria || '',
+                                  departamento_id: tmpl.departamento_id,
+                                  recorrente: !!tmpl.recorrente,
+                                  recorrencia_padrao: tmpl.recorrencia_padrao || 'mensal',
+                                  etapas: safeEtapas(tmpl.etapas),
+                                }
+                                fetch('/api/processo-templates', {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + (JSON.parse(localStorage.getItem('nfse_token') || '{}').access_token || '') },
+                                  body: JSON.stringify(body),
+                                }).then(() => invalidate())
+                              }}
+                              className="rounded border border-amber-400/30 px-3 py-1 text-xs tracking-wider text-amber-500 transition-colors hover:bg-amber-400/10"
+                            >
+                              Duplicar
+                            </button>
+                          )}
                         </td>
                       </tr>
                     ))}
@@ -318,6 +466,91 @@ export default function ProcessosPage() {
       {/* ===== INSTANCIAS ===== */}
       {subTab === 'instancias' && (
         <div className="space-y-5">
+          {selectedProcesso && (
+            <div ref={detailRef}>
+              <ProcessoDetail
+              processo={selectedProcesso}
+              me={me}
+              saving={mutUpdate.isPending}
+              editingSituacao={editingSituacao}
+              onSetSituacao={setEditingSituacao}
+              onSaveSituacao={() => {
+                if (!editingSituacao) return
+                mutSituacao.mutate({ id: editingSituacao.id, situacao: editingSituacao.situacao }, {
+                  onSuccess: () => {
+                    setSelectedProcesso(prev => (prev && prev.id === editingSituacao.id ? { ...prev, situacao: editingSituacao.situacao } : prev))
+                    setEditingSituacao(null)
+                  },
+                })
+              }}
+              onChangeStatus={(status) => mutUpdate.mutate({ id: selectedProcesso.id, payload: { status } })}
+              onCompleteStep={(optLabel) => completeStep(selectedProcesso, optLabel)}
+              onAnexarEtapa={(stepId) => anexarEtapa(stepId)}
+              onToggleSubtask={(stepId, subId) => toggleSubtask(selectedProcesso, stepId, subId)}
+              onDelete={() => {
+                if (confirm('Excluir processo ' + selectedProcesso.titulo + ' de cliente ' + (selectedProcesso.cliente_nome || '?') + '?')) {
+                  mutDelete.mutate(selectedProcesso.id, { onSuccess: () => setSelectedProcesso(null) })
+                }
+              }}
+              onOpenKanban={() => navigate(`/processos/${selectedProcesso.id}`)}
+              onClose={() => setSelectedProcesso(null)}
+              mostrarAoCliente={!!selectedProcesso.mostrar_ao_cliente}
+              onToggleMostrarCliente={() => mutUpdate.mutate({
+                id: selectedProcesso.id,
+                payload: { mostrar_ao_cliente: !selectedProcesso.mostrar_ao_cliente },
+              }, { onSuccess: () => {
+                setSelectedProcesso(prev => (prev && prev.id === selectedProcesso.id ? { ...prev, mostrar_ao_cliente: !prev.mostrar_ao_cliente } : prev))
+                qc.invalidateQueries({ queryKey: ['processos'] })
+              } })}
+              />
+            </div>
+          )}
+          {isGestor && (
+            <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card p-3">
+              <input
+                type="text"
+                value={busca}
+                onChange={e => setBusca(e.target.value)}
+                placeholder="Buscar por nome do processo, cliente..."
+                className="h-9 min-w-[220px] flex-1 rounded-md border border-input bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+              />
+              <select value={filtroResponsavel} onChange={e => setFiltroResponsavel(e.target.value)}
+                className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring">
+                <option value="">Todos responsáveis</option>
+                {usuarios.map((u: any) => (
+                  <option key={u.id} value={u.id}>{u.display_name || u.username || u.id}</option>
+                ))}
+              </select>
+              <select value={filtroCliente} onChange={e => setFiltroCliente(e.target.value)}
+                className="h-9 max-w-[220px] rounded-md border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring">
+                <option value="">Todos clientes</option>
+                {clientes.map((c: any) => (
+                  <option key={c.id} value={c.id}>{c.name || c.nome || c.id}</option>
+                ))}
+              </select>
+              <select value={filtroDepartamento} onChange={e => setFiltroDepartamento(e.target.value)}
+                className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring">
+                <option value="">Todos departamentos</option>
+                {departamentos.map((d: any) => (
+                  <option key={d.id} value={d.id}>{d.nome}</option>
+                ))}
+              </select>
+              <select value={filtroPrioridade} onChange={e => setFiltroPrioridade(e.target.value)}
+                className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring">
+                <option value="">Todas prioridades</option>
+                <option value="Alta">Alta</option>
+                <option value="Média">Média</option>
+                <option value="Media">Média</option>
+                <option value="Baixa">Baixa</option>
+              </select>
+              {temFiltroInst && (
+                <button onClick={limparFiltrosInst}
+                  className="h-9 rounded-md border border-border px-3 text-xs text-muted-foreground transition-colors hover:text-foreground">
+                  Limpar filtros
+                </button>
+              )}
+            </div>
+          )}
           <div className="flex flex-wrap items-center gap-1">
             {STATUS_FILTERS.map(s => (
               <button
@@ -332,6 +565,18 @@ export default function ProcessosPage() {
                 {s.label}
               </button>
             ))}
+            <span className="mx-2 h-4 w-px bg-border" />
+            <button
+              onClick={() => setMeusProcessos(x => !x)}
+              title="Mostrar apenas processos em que você participa (responsável, etapa ou criador)"
+              className={`rounded px-3 py-1.5 text-xs tracking-wider transition-colors ${
+                meusProcessos
+                  ? 'border border-emerald-500/40 bg-emerald-500/15 text-emerald-600'
+                  : 'border border-transparent text-muted-foreground hover:bg-muted/50 hover:text-foreground'
+              }`}
+            >
+              {meusProcessos ? '✓ Meus processos' : 'Meus processos'}
+            </button>
           </div>
 
           <div className="card-soft overflow-hidden rounded-lg bg-card">
@@ -346,6 +591,7 @@ export default function ProcessosPage() {
                       <SortableTh k="cliente" sortKey={sProcessos.sortKey} sortDir={sProcessos.sortDir} onToggle={sProcessos.toggle}>Cliente</SortableTh>
                       <SortableTh k="status" sortKey={sProcessos.sortKey} sortDir={sProcessos.sortDir} onToggle={sProcessos.toggle} align="center">Status</SortableTh>
                       <SortableTh k="prioridade" sortKey={sProcessos.sortKey} sortDir={sProcessos.sortDir} onToggle={sProcessos.toggle} align="center">Prioridade</SortableTh>
+                      <th className="py-2 pr-3 text-center text-xs font-semibold uppercase tracking-wide text-muted-foreground">Doc</th>
                       <SortableTh k="data_inicio" sortKey={sProcessos.sortKey} sortDir={sProcessos.sortDir} onToggle={sProcessos.toggle} align="center">Data Inicio</SortableTh>
                       <SortableTh k="created" sortKey={sProcessos.sortKey} sortDir={sProcessos.sortDir} onToggle={sProcessos.toggle} align="right">Criado</SortableTh>
                     </tr>
@@ -370,6 +616,7 @@ export default function ProcessosPage() {
                         <td className="px-4 py-3 text-center text-xs font-medium" style={{ color: PRIORIDADE_MAP[p.prioridade] || '#535353' }}>
                           {p.prioridade}
                         </td>
+                        <td className="px-4 py-3 text-center">{renderDocIndicador(p)}</td>
                         <td className="px-4 py-3 text-center text-muted-foreground">{fmtDateBR(p.data_inicio)}</td>
                         <td className="px-4 py-3 text-right text-muted-foreground">{fmtDateBR(p.created_at)}</td>
                       </tr>
@@ -379,131 +626,17 @@ export default function ProcessosPage() {
               </div>
             )}
           </div>
-
-          {selectedProcesso && (
-            <ProcessoDetail
-              processo={selectedProcesso}
-              saving={mutUpdate.isPending}
-              editingSituacao={editingSituacao}
-              onSetSituacao={setEditingSituacao}
-              onSaveSituacao={() => {
-                if (!editingSituacao) return
-                mutSituacao.mutate({ id: editingSituacao.id, situacao: editingSituacao.situacao }, {
-                  onSuccess: () => {
-                    setSelectedProcesso(prev => (prev && prev.id === editingSituacao.id ? { ...prev, situacao: editingSituacao.situacao } : prev))
-                    setEditingSituacao(null)
-                  },
-                })
-              }}
-              onChangeStatus={(status) => mutUpdate.mutate({ id: selectedProcesso.id, payload: { status } })}
-              onCompleteStep={(optLabel) => completeStep(selectedProcesso, optLabel)}
-              onToggleSubtask={(stepId, subId) => toggleSubtask(selectedProcesso, stepId, subId)}
-              onDelete={() => {
-                if (confirm('Excluir processo ' + selectedProcesso.titulo + ' de cliente ' + (selectedProcesso.cliente_nome || '?') + '?')) {
-                  mutDelete.mutate(selectedProcesso.id, { onSuccess: () => setSelectedProcesso(null) })
-                }
-              }}
-              onOpenKanban={() => setKanbanProcesso(selectedProcesso)}
-            />
-          )}
         </div>
       )}
 
       {/* ===== KANBAN ===== */}
       {subTab === 'kanban' && (
-        <div className="space-y-5">
-          <div className="text-xs text-muted-foreground">{processos.length} processo(s)</div>
-          <div className="grid grid-cols-5 gap-4" style={{ minHeight: '60vh' }}>
-            {KANBAN_COLUMNS.map(col => {
-              const colProcesses = processos.filter(p => getKanbanStatus(p) === col.key)
-              return (
-                <div
-                  key={col.key}
-                  className="flex flex-col rounded-xl border border-border bg-card"
-                  onDragOver={e => e.preventDefault()}
-                  onDrop={e => {
-                    e.preventDefault()
-                    const id = Number(e.dataTransfer.getData('text/plain'))
-                    if (!id) return
-                    if (col.status === 'aguardando_decisao') return
-                    mutUpdate.mutate({ id, payload: { status: col.status } })
-                  }}
-                >
-                  <div className="border-b border-border/60 p-3">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs tracking-wider text-muted-foreground">{col.label}</span>
-                      <span className="text-xs text-muted-foreground">{colProcesses.length}</span>
-                    </div>
-                  </div>
-                  <div className="flex-1 space-y-2 overflow-y-auto p-2">
-                    {colProcesses.length === 0 ? (
-                      <div className="flex h-24 items-center justify-center rounded-lg border border-dashed border-border">
-                        <span className="text-xs text-muted-foreground">Sem processos</span>
-                      </div>
-                    ) : (
-                      colProcesses.map(p => {
-                        const etapas = safeEtapas(p.etapas)
-                        const completed = countCompleted(etapas)
-                        const total = etapas.length
-                        const { step: current } = getCurrentStep(etapas)
-                        const borderColor = STATUS_MAP[col.key]?.color || '#535353'
-                        const pct = total > 0 ? Math.round((completed / total) * 100) : 0
-                        return (
-                          <div
-                            key={p.id}
-                            draggable
-                            onDragStart={e => e.dataTransfer.setData('text/plain', String(p.id))}
-                            className="cursor-grab rounded-lg border border-border bg-background p-3 transition-colors hover:border-[#0078d4]/30 active:cursor-grabbing"
-                            style={{ borderLeftWidth: '3px', borderLeftColor: borderColor }}
-                          >
-                            <div className="mb-2 flex items-center justify-between">
-                              <span className="truncate text-xs text-muted-foreground">{p.cliente_nome || '-'}</span>
-                              <select
-                                value={p.status}
-                                onChange={e => { e.stopPropagation(); mutUpdate.mutate({ id: p.id, payload: { status: e.target.value } }) }}
-                                onClick={e => e.stopPropagation()}
-                                className="cursor-pointer rounded border border-border bg-transparent px-1 py-0.5 text-xs text-muted-foreground focus:outline-none"
-                              >
-                                {Object.keys(STATUS_MAP).map(s => (
-                                  <option key={s} value={s}>{STATUS_MAP[s].label}</option>
-                                ))}
-                              </select>
-                            </div>
-                            <div
-                              className="mb-2 cursor-pointer text-xs font-medium hover:text-[#0078d4]"
-                              onClick={() => { setSubTab('instancias'); setSelectedProcesso(p) }}
-                            >
-                              {p.titulo}
-                            </div>
-                            <div className="mb-1.5">
-                              <div className="h-1 flex-1 overflow-hidden rounded-full bg-border">
-                                <div
-                                  className="h-full rounded-full transition-all"
-                                  style={{ width: pct + '%', backgroundColor: pct === 100 ? '#10B981' : '#5C939F' }}
-                                />
-                              </div>
-                            </div>
-                            {current && (
-                              <div className="flex items-center gap-1.5">
-                                <span
-                                  className="rounded px-2 py-0.5 text-xs"
-                                  style={{ backgroundColor: (STEP_TYPE_COLORS[current.type] || '#535353') + '18', color: STEP_TYPE_COLORS[current.type] || '#535353' }}
-                                >
-                                  {current.type}
-                                </span>
-                                <span className="truncate text-xs text-muted-foreground">{current.title}</span>
-                              </div>
-                            )}
-                          </div>
-                        )
-                      })
-                    )}
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        </div>
+        <KanbanBoard processos={processos} usersMap={usersMap} deptMap={deptMap} onDrop={payload => mutUpdate.mutate(payload)} onOpen={p => navigate(`/processos/${p.id}`)} />
+      )}
+
+      {/* ===== APROVAÇÕES ===== */}
+      {subTab === 'aprovacoes' && (
+        <AprovacoesCentral onOpen={p => navigate(`/processos/${p.id}`)} />
       )}
 
       {/* ===== RECORRENCIAS ===== */}
@@ -538,7 +671,7 @@ export default function ProcessosPage() {
                   }).map(entry => (
                     <tr key={entry.template.id} className="border-t border-border/40 transition-colors hover:bg-muted/30">
                       <td className="px-4 py-3">{entry.template.titulo}</td>
-                      <td className="px-4 py-3 text-muted-foreground capitalize">{entry.template.recorrencia_padrao || 'mensal'}</td>
+                      <td className="px-4 py-3 text-muted-foreground">{fmtRecorrencia(entry.template)}</td>
                       <td className="px-4 py-3 text-center">
                         <span
                           className="inline-flex items-center rounded px-2 py-0.5 text-xs tracking-wider"
@@ -781,9 +914,280 @@ export default function ProcessosPage() {
           )}
         </div>
       )}
+    </div>
+  )
+}
 
-      {kanbanProcesso && (
-        <KanbanPorProcesso processo={kanbanProcesso} onClose={() => { setKanbanProcesso(null); invalidate() }} />
+function KanbanCard({ p, colKey, usersMap, deptMap, onOpen }: {
+  p: Processo
+  colKey: string
+  usersMap: Record<string, any>
+  deptMap: Record<string, any>
+  onOpen: (p: Processo) => void
+}) {
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: String(p.id) })
+  const etapas = safeEtapas(p.etapas)
+  const completed = countCompleted(etapas)
+  const total = etapas.length
+  const { step: current, index: currentIdx } = getCurrentStep(etapas)
+  const borderColor = STATUS_MAP[colKey]?.color || '#535353'
+  const pct = total > 0 ? Math.round((completed / total) * 100) : 0
+  // Vencimento: dueDate da etapa atual, senão prazo do processo
+  const venc = current?.dueDate || ''
+  const isVencido = !current?.isCompleted && venc && new Date(venc + 'T00:00:00') < new Date(new Date().toISOString().slice(0, 10) + 'T00:00:00')
+  const responsavel = (p.user_id && usersMap[String(p.user_id)])
+    ? (usersMap[String(p.user_id)].display_name || usersMap[String(p.user_id)].username || '')
+    : ((p as any).responsavel_nome || '')
+  const deptoId = current?.departamento_id ?? (p as any).template_departamento_id
+  const departamento = deptoId && deptMap[String(deptoId)] ? deptMap[String(deptoId)].nome : ''
+  return (
+    <div
+      ref={setNodeRef}
+      {...attributes}
+      {...listeners}
+      draggable={false}
+      className="cursor-grab rounded-lg border border-border bg-background p-3 transition-colors hover:border-[#0078d4]/30 active:cursor-grabbing"
+      style={{ borderLeftWidth: '3px', borderLeftColor: borderColor, opacity: isDragging ? 0.4 : 1, transform: CSS.Translate.toString(transform), touchAction: 'none' }}
+    >
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <span className="truncate text-xs text-muted-foreground">{p.cliente_nome || '-'}</span>
+        <span className="ml-2 shrink-0 text-[9px] text-muted-foreground">{p.status}</span>
+      </div>
+      <div className="mb-2 cursor-pointer text-xs font-medium hover:text-[#0078d4]" onClick={e => { e.stopPropagation(); onOpen(p) }}>
+        {p.titulo}
+      </div>
+      <div className="mb-1.5">
+        <div className="h-1 flex-1 overflow-hidden rounded-full bg-border">
+          <div
+            className="h-full rounded-full transition-all"
+            style={{ width: pct + '%', backgroundColor: pct === 100 ? '#10B981' : '#5C939F' }}
+          />
+        </div>
+        <div className="mt-1 flex items-center justify-between text-[10px] text-muted-foreground">
+          <span>{completed}/{total} etapas</span>
+          {currentIdx >= 0 && <span>Etapa {currentIdx + 1}/{total}</span>}
+        </div>
+      </div>
+      {responsavel && (
+        <div className="mb-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+          <svg className="h-3 w-3 shrink-0 opacity-70" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" />
+          </svg>
+          <span className="truncate">{responsavel}</span>
+        </div>
+      )}
+      {departamento && (
+        <div className="mb-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+          <svg className="h-3 w-3 shrink-0 opacity-70" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <rect x="3" y="4" width="18" height="16" rx="2" /><path d="M8 4v16M16 4v16M3 12h18" />
+          </svg>
+          <span className="truncate">{departamento}</span>
+        </div>
+      )}
+      {venc && (
+        <div className={`mb-1.5 text-xs ${isVencido ? 'text-rose-500' : 'text-muted-foreground'}`}>
+          Vence: {fmtDateBR(venc)}
+        </div>
+      )}
+      {current && (
+        <div className="flex items-center gap-1.5">
+          <span
+            className="rounded px-2 py-0.5 text-xs"
+            style={{ backgroundColor: (STEP_TYPE_COLORS[current.type] || '#535353') + '18', color: STEP_TYPE_COLORS[current.type] || '#535353' }}
+          >
+            {current.type}
+          </span>
+          <span className="truncate text-xs text-muted-foreground">{current.title}</span>
+        </div>
+      )}
+      {current?.aprovacao_status === 'pendente' && (
+        <div className="mt-1.5 inline-flex items-center gap-1 rounded bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-medium text-amber-600">
+          Aguardando aprovação
+        </div>
+      )}
+      {current?.exige_documento && (
+        <div className="mt-1.5 flex items-center gap-1">
+          {current.anexo ? (
+            <a
+              href={current.anexo.url}
+              target="_blank" rel="noreferrer"
+              onClick={ev => { ev.stopPropagation(); ev.preventDefault(); void openAuthedFile(current.anexo!.url) }}
+              className="inline-flex cursor-pointer items-center gap-1 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[9px] font-medium text-emerald-600 hover:bg-emerald-500/25"
+            >
+              <FileCheck2 className="h-3 w-3" /> {current.anexo.nome.slice(0, 22)}
+            </a>
+          ) : (
+            <span className="inline-flex items-center gap-1 rounded bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-medium text-amber-600">
+              <FileWarning className="h-3 w-3" /> exige anexo
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function KanbanColumn({ col, processos, usersMap, deptMap, onOpen }: {
+  col: (typeof KANBAN_COLUMNS)[number]
+  processos: Processo[]
+  usersMap: Record<string, any>
+  deptMap: Record<string, any>
+  onOpen: (p: Processo) => void
+}) {
+  const { setNodeRef, isOver } = useDroppable({ id: col.key, data: { col: col.key } })
+  return (
+    <div
+      ref={setNodeRef}
+      className="flex w-60 shrink-0 flex-col rounded-xl border border-border bg-card transition-colors"
+      style={{ borderColor: isOver ? (STATUS_MAP[col.key]?.color || '#0078d4') + '60' : undefined }}
+    >
+      <div className="border-b border-border/60 p-3">
+        <div className="flex items-center justify-between">
+          <span className="text-xs tracking-wider text-muted-foreground">{col.label}</span>
+          <span className="text-xs text-muted-foreground">{processos.length}</span>
+        </div>
+      </div>
+      <div className="flex-1 space-y-2 overflow-y-auto p-2" style={{ minHeight: '300px' }}>
+        {processos.length === 0 ? (
+          <div className="flex h-24 items-center justify-center rounded-lg border border-dashed border-border">
+            <span className="text-xs text-muted-foreground">Sem processos</span>
+          </div>
+        ) : (
+          processos.map(p => <KanbanCard key={p.id} p={p} colKey={col.key} usersMap={usersMap} deptMap={deptMap} onOpen={onOpen} />)
+        )}
+      </div>
+    </div>
+  )
+}
+
+function KanbanBoard({ processos, usersMap, deptMap, onDrop, onOpen }: {
+  processos: Processo[]
+  usersMap: Record<string, any>
+  deptMap: Record<string, any>
+  onDrop: (payload: { id: number; payload: Record<string, unknown> }) => void
+  onOpen: (p: Processo) => void
+}) {
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 150, tolerance: 8 } }),
+  )
+
+  const handleDragEnd = (e: DragEndEvent) => {
+    if (!e.over) return
+    const id = Number(e.active.id)
+    const colKey = String(e.over.id)
+    const col = KANBAN_COLUMNS.find(c => c.key === colKey)
+    if (!col) return
+    const p = processos.find(x => x.id === id)
+    if (!p) return
+    if (getKanbanStatus(p) === colKey) return
+    if (col.status === 'Aguardando_Decisao') return
+    onDrop({ id, payload: { status: col.status } })
+  }
+
+  return (
+    <DndContext sensors={sensors} collisionDetection={closestCorners} onDragEnd={handleDragEnd}>
+      <div className="space-y-5">
+        <div className="text-xs text-muted-foreground">{processos.length} processo(s)</div>
+        <div className="overflow-x-auto pb-2">
+          <div className="flex gap-4" style={{ minHeight: '60vh' }}>
+            {KANBAN_COLUMNS.map(col => {
+              const colProcesses = processos.filter(p => getKanbanStatus(p) === col.key)
+              return (
+                <KanbanColumn key={col.key} col={col} processos={colProcesses} usersMap={usersMap} deptMap={deptMap} onOpen={onOpen} />
+              )
+            })}
+          </div>
+        </div>
+      </div>
+    </DndContext>
+  )
+}
+
+function AprovacoesCentral({ onOpen }: { onOpen: (p: Processo) => void }) {
+  const qc = useQueryClient()
+  const { data: pendentes = [], refetch, isLoading } = useQuery({
+    queryKey: ['aprovacoes-pendentes'],
+    queryFn: listAprovacoesPendentes,
+    refetchInterval: 30_000,
+    staleTime: 15_000,
+  })
+  const [motivo, setMotivo] = useState<Record<number, string>>({})
+
+  const decidir = async (item: AprovacaoPendente, aprovar: boolean) => {
+    try {
+      if (aprovar) {
+        await aprovarEtapa(item.processo_id, item.etapa_id)
+      } else {
+        const c = (motivo[item.processo_id] || '').trim()
+        if (c.length < 3) { alert('Informe o motivo da reprovação'); return }
+        await reprovarEtapa(item.processo_id, item.etapa_id, c)
+        setMotivo(prev => ({ ...prev, [item.processo_id]: '' }))
+      }
+      qc.invalidateQueries({ queryKey: ['aprovacoes-pendentes'] })
+      qc.invalidateQueries({ queryKey: ['processos'] })
+      refetch()
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Erro ao processar aprovação')
+    }
+  }
+
+  const emAbertoDocs = (item: AprovacaoPendente) => {
+    const itens = Object.fromEntries((item.checklist || []).map(i => [String(i.id), i]))
+    return (item.documentos_exigidos || []).filter(d => !(itens[String(d.id)]?.anexo)).length
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="text-xs text-muted-foreground">{pendentes.length} aprovação(ões) pendente(s)</div>
+      {isLoading ? (
+        <div className="text-sm text-muted-foreground">Carregando aprovações…</div>
+      ) : pendentes.length === 0 ? (
+        <div className="card-soft rounded-lg bg-card p-12 text-center text-sm text-muted-foreground">Nenhuma aprovação pendente. 🎉</div>
+      ) : (
+        <div className="space-y-3">
+          {pendentes.map(item => (
+            <div key={item.processo_id + item.etapa_id} className="card-soft rounded-lg bg-card p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-foreground">{item.processo_titulo}</p>
+                  <p className="text-xs text-muted-foreground">{item.cliente_nome}</p>
+                  <p className="mt-1.5 text-xs text-foreground">
+                    Etapa: <span className="font-medium text-amber-600">{item.etapa_titulo}</span>
+                  </p>
+                  <p className="mt-0.5 text-[11px] text-muted-foreground">
+                    Solicitado por {item.solicitado_por || '—'} · {item.solicitado_em ? new Date(item.solicitado_em).toLocaleDateString('pt-BR') : ''}
+                    {item.aprovador_nome ? ` · Aprovador: ${item.aprovador_nome}` : ''}
+                  </p>
+                  {item.documentos_exigidos.length > 0 && (
+                    <p className="mt-1 text-[11px] text-muted-foreground">
+                      Documentos: {item.checklist.filter(i => i.anexo).length}/{item.documentos_exigidos.length} anexados
+                      {emAbertoDocs(item) > 0 && <span className="ml-1 text-amber-600">({emAbertoDocs(item)} pendente(s))</span>}
+                    </p>
+                  )}
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  <button onClick={() => onOpen({ id: item.processo_id } as Processo)} className="rounded border border-border px-3 py-1.5 text-xs text-[#0078d4] hover:bg-muted">
+                    Abrir processo
+                  </button>
+                  <button onClick={() => decidir(item, true)} className="rounded bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700">
+                    Aprovar
+                  </button>
+                  <button onClick={() => decidir(item, false)} className="rounded bg-rose-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-rose-700">
+                    Reprovar
+                  </button>
+                </div>
+              </div>
+              <textarea
+                value={motivo[item.processo_id] || ''}
+                onChange={e => setMotivo(prev => ({ ...prev, [item.processo_id]: e.target.value }))}
+                placeholder="Motivo da reprovação (obrigatório ao reprovar)"
+                rows={2}
+                className="mt-3 w-full resize-none rounded-md border border-input bg-background px-3 py-2 text-xs text-foreground outline-none focus:ring-1 focus:ring-ring"
+              />
+            </div>
+          ))}
+        </div>
       )}
     </div>
   )

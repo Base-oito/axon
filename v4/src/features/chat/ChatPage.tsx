@@ -2,11 +2,13 @@ import { useEffect, useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiFetch, getToken } from '@/lib/api'
 import { useVoice } from '@/features/chat/voice/VoiceProvider'
+import EnqueteCard from '@/features/chat/components/EnqueteCard'
+import { useIsMobile } from '@/hooks/useMediaQuery'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
-import { Send, MessageSquare, Search, MoreVertical, Reply, Forward, ClipboardList, Trash2, X, Plus, Mic, Paperclip, Square, Trash, Info, Copy, Users, Pin, PhoneOff, Headphones } from 'lucide-react'
+import { Send, MessageSquare, Search, MoreVertical, Reply, Forward, ClipboardList, Trash2, X, Plus, Mic, Paperclip, Square, Trash, Info, Copy, Users, Pin, PhoneOff, Headphones, Smile, BarChart3, Loader2, ChevronDown, ChevronLeft } from 'lucide-react'
 
 interface Canal { id: number; nome: string; fixo?: boolean; tipo?: string }
-interface Usuario { id: number; display_name?: string; username?: string; role?: string }
+interface Usuario { id: number; display_name?: string; username?: string; role?: string; last_active?: string | null }
 
 interface Reacao { user_id: number; reacao: string; user_name: string }
 
@@ -28,6 +30,10 @@ interface Mensagem {
   created_at?: string
   reacoes?: Reacao[]
   visualizacoes?: Visualizacao[]
+  enquete_id?: number | null
+  resposta_para_id?: number | null
+  respondida_conteudo?: string | null
+  respondida_autor?: string | null
   anexos?: any[]
 }
 
@@ -46,6 +52,8 @@ function getUserId(): { id: number; role: string } {
 }
 
 const IS_ADMIN = ['administrador', 'super_admin']
+
+const isLeader = () => ['administrador', 'lider', 'super_admin'].includes(getUserId().role)
 
 function fmtDateTime(d?: string) {
   if (!d) return ''
@@ -89,12 +97,24 @@ function safeAnexos(item: any): any[] {
   return []
 }
 
-const EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🙏']
+const EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🙏', '🔥', '🎉', '👏', '😍', '😅', '🤝', '😡', '😱', '🤔', '✅', '💪', '👀']
+
+const MSG_EMOJIS = [
+  '😀', '😄', '😁', '😆', '😅', '😂', '🤣', '😊', '😇', '🙂', '🙃', '😉', '😍', '🥰', '😘', '😜', '🤪', '😎', '🤓', '🧐',
+  '🤔', '🤨', '😐', '😑', '😶', '😏', '😒', '🙄', '😬', '😮', '😯', '😲', '😳', '🥺', '😢', '😭', '😤', '😠', '😡', '🤬',
+  '😱', '😨', '😰', '😥', '😓', '🤗', '🤔', '🤭', '🤫', '🤥', '😶‍🌫️', '😴', '🤤', '😪', '🥱', '😷', '🤒', '🤕', '🤢', '🤮',
+  '🤧', '🥵', '🥶', '🥴', '😵', '😵‍💫', '🤯', '🤠', '🥳', '😎', '🤓', '🧐', '😕', '😟', '🙁', '😖', '😞', '😣', '😩', '😫',
+  '🥲', '😸', '😹', '😺', '😻', '😼', '😽', '🙀', '😿', '😾', '❤️', '🧡', '💛', '💚', '💙', '💜', '🖤', '🤍', '🤎', '💔',
+  '💯', '🔥', '✨', '⭐', '🌟', '💫', '🎉', '🎊', '🎈', '🎁', '🏆', '🥇', '🥈', '🥉', '⚽', '🏀', '🎯', '🎮', '🎧', '🎵',
+  '🎶', '🎤', '💪', '👏', '🙌', '👌', '👍', '👎', '👊', '✊', '🤝', '🙏', '💅', '👋', '🤙', '✌️', '🤞', '🫶', '🤲', '👀',
+  '✅', '❌', '❗', '❓', '💡', '📌', '📎', '📅', '⏰', '☕', '🍕', '🍔', '🌮', '🎂', '🍀', '🌹', '🌈', '☀️', '🌧️', '❄️',
+]
 
 export default function ChatPage() {
   const qc = useQueryClient()
   const me = getUserId()
   const voice = useVoice()
+  const isMobile = useIsMobile()
   const [activeType, setActiveType] = useState<'channel' | 'dm' | null>(null)
   const [activeId, setActiveId] = useState<number | null>(null)
   const [texto, setTexto] = useState('')
@@ -124,6 +144,9 @@ export default function ChatPage() {
   const [dragOver, setDragOver] = useState(false)
   const [msgSearch, setMsgSearch] = useState('')
   const [vistoMsgId, setVistoMsgId] = useState<number | null>(null)
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false)
+  const [showEnqueteModal, setShowEnqueteModal] = useState(false)
+  const emojiRef = useRef<HTMLDivElement>(null)
   const recorderRef = useRef<MediaRecorder | null>(null)
   const recChunksRef = useRef<Blob[]>([])
   const recTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -131,12 +154,18 @@ export default function ChatPage() {
   const listRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const justSent = useRef(false)
+  const nearBottomRef = useRef(true)
 
   // ── Queries ──────────────────────────────────────────
   const { data: canais } = useQuery({
     queryKey: ['chat-canais'],
     queryFn: () => apiFetch<Canal[]>('/api/chat/canais'),
     staleTime: 60_000, refetchInterval: 30_000,
+  })
+  const { data: vozCanais } = useQuery({
+    queryKey: ['chat-voz-participantes'],
+    queryFn: () => apiFetch<Array<{ canal_id: number; canal_nome: string; participantes: Array<{ user_id: number; nome: string; falando: boolean }> }>>('/api/voice/participants'),
+    refetchInterval: 15_000,
   })
   const { data: usuarios } = useQuery({
     queryKey: ['chat-usuarios'],
@@ -198,8 +227,13 @@ export default function ChatPage() {
   }
 
   const addFiles = (files: File[]) => {
-    for (const file of files) {
-      if (file.size > 2 * 1024 * 1024) { alert(`Arquivo "${file.name}" excede 2MB`); continue }
+    for (const f of files) {
+      if (f.size > 5 * 1024 * 1024) { alert(`Arquivo "${f.name || 'imagem'}" excede 5MB`); continue }
+      let file = f
+      if (!file.name && file.type.startsWith('image/')) {
+        const ext = file.type.split('/')[1]?.replace('jpeg', 'jpg') || 'png'
+        file = new File([file], `imagem-${Date.now()}.${ext}`, { type: file.type })
+      }
       setAttachments(prev => [...prev, { file, preview: URL.createObjectURL(file) }])
     }
   }
@@ -218,8 +252,33 @@ export default function ChatPage() {
     e.preventDefault()
     setDragOver(false)
     if (!activeType) return
+    const files: File[] = []
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      addFiles(Array.from(e.dataTransfer.files))
+      files.push(...Array.from(e.dataTransfer.files))
+    } else if (e.dataTransfer.items) {
+      for (const item of Array.from(e.dataTransfer.items)) {
+        const f = item.kind === 'file' ? item.getAsFile() : null
+        if (f) files.push(f)
+      }
+    }
+    if (files.length > 0) addFiles(files)
+  }
+
+  const handlePaste = (e: React.ClipboardEvent) => {
+    if (!activeType) return
+    const items = e.clipboardData?.items
+    if (!items) return
+    const images: File[] = []
+    for (const item of Array.from(items)) {
+      if (item.kind === 'file' && item.type.startsWith('image/')) {
+        const f = item.getAsFile()
+        if (f) images.push(f)
+      }
+    }
+    if (images.length > 0) {
+      e.preventDefault()
+      e.stopPropagation()
+      addFiles(images)
     }
   }
 
@@ -321,6 +380,7 @@ export default function ChatPage() {
         setUploading(false)
       }
       const body: any = { conteudo: msg }
+      if (replyTo) body.resposta_para_id = replyTo.id
       if (anexos) body.anexos = anexos
       if (activeType === 'channel') body.canal_id = activeId
       const url = activeType === 'channel' ? '/api/chat/mensagens' : `/api/chat/dm/${activeId}`
@@ -384,11 +444,18 @@ export default function ChatPage() {
   // ── Ao ABRIR uma conversa: posiciona na última mensagem (embaixo),
   //    aguardando as mensagens carregarem. Sem rolagem automática depois. ──
   const justOpened = useRef(false)
+  const [novasMsg, setNovasMsg] = useState(0)
   useEffect(() => {
     if (!activeType || !activeId) return
     justOpened.current = true
     justSent.current = false
-    return () => { justOpened.current = false }
+    nearBottomRef.current = true
+    setNovasMsg(0)
+    return () => {
+      justOpened.current = false
+      nearBottomRef.current = true
+      setNovasMsg(0)
+    }
   }, [activeType, activeId])
 
   useEffect(() => {
@@ -398,14 +465,52 @@ export default function ChatPage() {
     justOpened.current = false
   }, [mensagensOrdenadas])
 
-  // ── Rolagem automática APENAS quando a gente ENVIA uma mensagem ──
-  //    (nunca ao receber, para não atrapalhar a busca de mensagens antigas)
+  // ── Rolagem automática INTELIGENTE ──
+  //  • Ao ENVIAR mensagem: sempre rola para o fim (ação do próprio usuário).
+  //  • Ao RECEBER novas mensagens: rola para o fim APENAS se o usuário já estava
+  //    perto do fim (~80px). Se estiver rolando/buscando mensagens antigas,
+  //    NÃO interrompe: apenas incrementa o contador flutuante "novas mensagens".
+  const prevCountRef = useRef(0)
   useEffect(() => {
-    if (!justSent.current || !mensagensOrdenadas || mensagensOrdenadas.length === 0) return
+    if (!mensagensOrdenadas || mensagensOrdenadas.length === 0) return
     const el = listRef.current
-    if (el) el.scrollTop = el.scrollHeight
-    justSent.current = false
+    if (!el) return
+    const pertoDoFim = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+    if (justSent.current) {
+      el.scrollTop = el.scrollHeight
+      nearBottomRef.current = true
+      setNovasMsg(0)
+      justSent.current = false
+      prevCountRef.current = mensagensOrdenadas.length
+      return
+    }
+    // Novas mensagens chegaram?
+    const chegouNovo = mensagensOrdenadas.length > prevCountRef.current
+    if (pertoDoFim) {
+      el.scrollTop = el.scrollHeight
+      nearBottomRef.current = true
+      setNovasMsg(0)
+    } else if (chegouNovo) {
+      setNovasMsg(n => n + (mensagensOrdenadas.length - prevCountRef.current))
+    }
+    prevCountRef.current = mensagensOrdenadas.length
   }, [mensagensOrdenadas])
+
+  const detectarScroll = () => {
+    const el = listRef.current
+    if (!el) return
+    const pertoDoFim = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+    nearBottomRef.current = pertoDoFim
+    if (pertoDoFim) setNovasMsg(0)
+  }
+
+  const rolarParaOFim = () => {
+    const el = listRef.current
+    if (!el) return
+    el.scrollTop = el.scrollHeight
+    nearBottomRef.current = true
+    setNovasMsg(0)
+  }
 
   // ── Autosize do textarea ─────────────────────────────
   useEffect(() => {
@@ -415,8 +520,48 @@ export default function ChatPage() {
     ta.style.height = Math.min(ta.scrollHeight, 160) + 'px'
   }, [texto])
 
-  const selectChannel = (c: Canal) => { setActiveType('channel'); setActiveId(c.id); setReplyTo(null); setShowDetail(false); setMsgSearch(''); setVistoMsgId(null) }
-  const selectDM = (u: Usuario) => { setActiveType('dm'); setActiveId(u.id); setReplyTo(null); setShowDetail(false); setMsgSearch(''); setVistoMsgId(null) }
+  // ── Fecha o picker de emoji ao clicar fora ───────────
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (emojiRef.current && !emojiRef.current.contains(e.target as Node)) {
+        setShowEmojiPicker(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  const inserirEmoji = (emoji: string) => {
+    setTexto(t => t + emoji)
+    setShowEmojiPicker(false)
+    setTimeout(() => textareaRef.current?.focus(), 0)
+  }
+
+  const selectChannel = (c: Canal) => {
+    setActiveType('channel'); setActiveId(c.id); setReplyTo(null); setShowDetail(false); setMsgSearch(''); setVistoMsgId(null)
+    marcarCanalLido(c.id)
+  }
+  const selectDM = (u: Usuario) => {
+    setActiveType('dm'); setActiveId(u.id); setReplyTo(null); setShowDetail(false); setMsgSearch(''); setVistoMsgId(null)
+    marcarDmLido(u.id)
+  }
+
+  const marcarCanalLido = async (canal_id: number) => {
+    const t = getToken()
+    if (!t) return
+    try {
+      await fetch(`/api/chat/canais/${canal_id}/read`, { method: 'POST', headers: { Authorization: 'Bearer ' + t } })
+      qc.invalidateQueries({ queryKey: ['chat-unread'] })
+    } catch { /* não crítico */ }
+  }
+  const marcarDmLido = async (user_id: number) => {
+    const t = getToken()
+    if (!t) return
+    try {
+      await fetch(`/api/chat/dm/${user_id}/read`, { method: 'POST', headers: { Authorization: 'Bearer ' + t } })
+      qc.invalidateQueries({ queryKey: ['chat-unread'] })
+    } catch { /* não crítico */ }
+  }
 
   const fecharConversa = () => {
     setActiveType(null)
@@ -502,7 +647,7 @@ export default function ChatPage() {
     } catch { /* ignore */ }
   }
 
-  const isOnline = (lastActive?: string) => {
+  const isOnline = (lastActive?: string | null) => {
     if (!lastActive) return false
     return Date.now() - new Date(lastActive).getTime() < 5 * 60_000
   }
@@ -529,18 +674,28 @@ export default function ChatPage() {
   const dmAtivo = activeType === 'dm' ? (usuarios || []).find(u => u.id === activeId) : null
   const titulo = canalAtivo?.nome || (dmAtivo ? (dmAtivo.display_name || dmAtivo.username) : 'Selecione uma conversa')
 
-  const avatar = (nome: string) => (
-    <span className="flex h-8 w-8 shrink-0 select-none items-center justify-center rounded-full bg-[#0078d4]/10 text-xs font-bold text-[#0078d4]">
+  const avatar = (nome: string, online?: boolean | null, size = 8) => (
+    <span className={`relative inline-flex h-${size} w-${size} shrink-0 select-none items-center justify-center rounded-full bg-[#0078d4]/10 text-xs font-bold text-[#0078d4]`}>
       {(nome || '?')[0]?.toUpperCase()}
+      {online === true && (
+        <span className="absolute -bottom-0.5 -right-0.5 flex h-3 w-3 items-center justify-center rounded-full bg-background">
+          <span className="h-2 w-2 rounded-full bg-emerald-500" />
+        </span>
+      )}
+      {online === false && (
+        <span className="absolute -bottom-0.5 -right-0.5 flex h-3 w-3 items-center justify-center rounded-full bg-background">
+          <span className="h-2 w-2 rounded-full bg-muted-foreground/40" />
+        </span>
+      )}
     </span>
   )
 
   return (
-    <div className="flex h-full min-h-[calc(100vh-7rem)] gap-4">
+    <div className="flex h-full min-h-[calc(100dvh-7rem)] gap-3 sm:gap-4">
       {/* ── Lista de contatos ── */}
-      <div className="card-soft flex w-72 shrink-0 flex-col overflow-hidden rounded-lg bg-card">
-        <div className="flex items-center justify-between border-b border-border/60 px-4 py-3">
-          <h2 className="text-sm font-semibold text-foreground">Conversas</h2>
+      <div className={`card-soft flex w-72 shrink-0 flex-col overflow-hidden rounded-lg bg-card ${isMobile && activeType ? 'hidden' : ''}`}>
+        <div className="flex items-center justify-between border-b border-border/60 px-2 py-3 sm:px-4">
+          <h2 className="text-xs font-semibold text-foreground sm:text-sm">Conversas</h2>
           {IS_ADMIN.includes(me.role) && (
             <button onClick={() => setShowCreateCanal(true)}
               className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
@@ -555,11 +710,19 @@ export default function ChatPage() {
             {(canais || []).filter(c => c.tipo !== 'voz').map(c => {
               const un = getUnread('channel', c.id)
               const active = activeType === 'channel' && activeId === c.id
+              const voz = (vozCanais || []).find(v => v.canal_id === c.id)
+              const naVoz = voz?.participantes?.filter(p => p.user_id !== me.id) || []
               return (
                 <button key={c.id} onClick={() => selectChannel(c)}
                   className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-sm transition-colors ${active ? 'bg-primary text-primary-foreground shadow-md shadow-primary/30' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}>
                   <MessageSquare className="h-4 w-4 shrink-0" />
                   <span className="min-w-0 flex-1 truncate text-left">{c.nome}</span>
+                  {naVoz.length > 0 && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400" title={`Em voz: ${naVoz.map(p => p.nome).join(', ')}`}>
+                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                      {naVoz.length}
+                    </span>
+                  )}
                   {un > 0 && <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-primary px-1.5 text-[10px] font-bold text-primary-foreground">{un}</span>}
                 </button>
               )
@@ -579,10 +742,11 @@ export default function ChatPage() {
               const active = activeType === 'dm' && activeId === u.id
               const nome = u.display_name || u.username || '?'
               const pinned = pinnedUsers.includes(u.id)
+              const userOnline = isOnline(u.last_active)
               return (
                 <div key={u.id} className={`group flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-sm transition-colors ${active ? 'bg-primary text-primary-foreground shadow-md shadow-primary/30' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}>
                   <button onClick={() => selectDM(u)} className="flex min-w-0 flex-1 items-center gap-2.5 text-left">
-                    {avatar(nome)}
+                    {avatar(nome, u.last_active ? userOnline : null)}
                     <span className="min-w-0 flex-1">
                       <span className="flex items-center gap-1 truncate">
                         {pinned && <Pin className={`h-3 w-3 shrink-0 ${active ? 'text-primary-foreground' : 'text-[#0078d4]'}`} />}
@@ -612,6 +776,7 @@ export default function ChatPage() {
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
+        onPaste={handlePaste}
       >
         {dragOver && (
           <div className="pointer-events-none absolute inset-0 z-40 flex items-center justify-center border-2 border-dashed border-[#0078d4] bg-[#0078d4]/5">
@@ -621,7 +786,12 @@ export default function ChatPage() {
           </div>
         )}
         <div className="flex items-center gap-2 border-b border-border/60 px-4 py-3">
-          {activeType === 'dm' && dmAtivo && avatar(dmAtivo.display_name || dmAtivo.username || '?')}
+          {isMobile && activeType && (
+            <button onClick={fecharConversa} className="shrink-0 rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground" aria-label="Voltar para conversas">
+              <ChevronLeft className="h-5 w-5" />
+            </button>
+          )}
+          {activeType === 'dm' && dmAtivo && avatar(dmAtivo.display_name || dmAtivo.username || '?', isOnline(dmAtivo.last_active))}
           <h2 className="flex-1 truncate text-sm font-semibold text-foreground">{titulo}</h2>
           {activeType && (
             <div className={`flex items-center gap-1.5 rounded-lg border transition-all ${msgSearch ? 'border-[#0078d4]/50 bg-[#0078d4]/5' : 'border-transparent'}`}>
@@ -700,7 +870,7 @@ export default function ChatPage() {
           )}
         </div>
 
-        <div ref={listRef} className="flex-1 space-y-4 overflow-y-auto p-4">
+        <div ref={listRef} onScroll={detectarScroll} className="flex-1 space-y-4 overflow-y-auto p-4">
           <TooltipProvider delayDuration={150}>
           {mensagensOrdenadas.map(m => {
             const isMine = m.de_user_id === me.id
@@ -711,8 +881,8 @@ export default function ChatPage() {
             const vistos = visualizacoes.filter(v => v.viewed_at)
             return (
               <div key={m.id} className={`group relative flex gap-2 ${isMine ? 'flex-row-reverse' : ''}`}>
-                {!isMine && avatar(nome)}
-                <div className={`flex max-w-[70%] flex-col ${isMine ? 'items-end' : 'items-start'}`}>
+                {!isMine && avatar(nome, isOnline((usuarios || []).find(x => x.id === m.de_user_id)?.last_active))}
+                <div className={`flex min-w-0 max-w-[70%] flex-col ${isMine ? 'items-end' : 'items-start'}`}>
                   {/* Nome + data/hora (alinha com o avatar no topo) */}
                   <div className={`mb-0.5 flex items-baseline gap-2 ${isMine ? 'justify-end' : ''}`}>
                     <span className="text-xs font-semibold text-[#0078d4]">{isMine ? 'Você' : nome}</span>
@@ -722,10 +892,21 @@ export default function ChatPage() {
                   <div className={`relative rounded-2xl px-3.5 py-2 text-left ${isMine ? 'rounded-br-md bg-primary text-primary-foreground shadow-md shadow-primary/20' : 'rounded-bl-md bg-muted/60'}`}>
                     {replyTo && replyTo.id === m.id && (
                       <p className={`mb-1 border-l-2 pl-2 text-xs ${isMine ? 'border-white/40 text-white/80' : 'border-[#0078d4]/40 text-muted-foreground'}`}>
-                        Respondendo…
+                        Respondendo a <span className="font-semibold">{replyTo.de_user_name || 'mensagem'}</span>: {getText(replyTo).slice(0, 60)}
                       </p>
                     )}
-                    <p className="whitespace-pre-wrap text-sm">{msgText}</p>
+                    {m.respondida_conteudo && (
+                      <div
+                        onClick={() => setReplyTo(m)}
+                        className={`mb-1.5 cursor-pointer rounded-lg border-l-2 px-2 py-1.5 text-xs ${isMine ? 'border-white/50 bg-white/10 text-white/85' : 'border-[#0078d4]/50 bg-background text-muted-foreground'}`}
+                      >
+                        <span className={`block font-semibold ${isMine ? 'text-white/90' : 'text-[#0078d4]'}`}>
+                          {m.respondida_autor || 'Mensagem'}
+                        </span>
+                        <span className="block break-words whitespace-pre-wrap">{m.respondida_conteudo}</span>
+                      </div>
+                    )}
+                    <p className="whitespace-pre-wrap break-words text-sm [overflow-wrap:anywhere]">{msgText}</p>
                     {/* Anexos */}
                     {safeAnexos(m.anexos).length > 0 && (
                       <div className="mt-2 space-y-2">
@@ -816,6 +997,13 @@ export default function ChatPage() {
                       </div>
                     )
                   )}
+                  {m.enquete_id && (
+                    <EnqueteCard
+                      enqueteId={m.enquete_id}
+                      isMine={isMine}
+                      onEncerrada={() => qc.invalidateQueries({ queryKey: ['chat-msgs'] })}
+                    />
+                  )}
                 </div>
                 {/* Menu de ações (hover) */}
                 <div className={`flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 ${isMine ? '' : ''}`}>
@@ -832,6 +1020,17 @@ export default function ChatPage() {
             <p className="py-8 text-center text-sm text-muted-foreground">
               {msgSearch ? 'Nenhuma mensagem encontrada para a busca.' : 'Nenhuma mensagem nesta conversa.'}
             </p>
+          )}
+
+          {/* Indicador flutuante: novas mensagens chegaram (usuário não está no fim) */}
+          {novasMsg > 0 && !msgSearch && (
+            <button
+              onClick={rolarParaOFim}
+              className="absolute bottom-24 left-1/2 z-30 flex -translate-x-1/2 items-center gap-2 rounded-full border border-border bg-popover px-3 py-1.5 text-xs font-medium text-foreground shadow-lg transition-all hover:bg-muted"
+            >
+              <ChevronDown className="h-3.5 w-3.5" />
+              {novasMsg} nova{novasMsg > 1 ? 's' : ''} mensagem{novasMsg > 1 ? 'ns' : ''}
+            </button>
           )}
         </div>
 
@@ -870,10 +1069,10 @@ export default function ChatPage() {
           </div>
         )}
 
-        <div className="flex items-end gap-2 border-t border-border/60 p-3">
+        <div className={`flex items-end gap-2 border-t border-border/60 p-3 ${voice.status === 'connected' ? 'pb-24' : ''}`}>
           <input ref={fileInputRef} type="file" multiple hidden onChange={handleFileSelect} />
           <button onClick={() => fileInputRef.current?.click()} disabled={!activeType || uploading}
-            title="Anexar arquivo (máx. 2MB)"
+            title="Anexar arquivo (máx. 5MB)"
             className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-card text-muted-foreground transition-colors hover:bg-muted disabled:opacity-40">
             <Paperclip className="h-4 w-4" />
           </button>
@@ -890,18 +1089,60 @@ export default function ChatPage() {
               <Square className="h-3.5 w-3.5" /> {recTime}s
             </button>
           )}
+          <div className="relative" ref={emojiRef}>
+            <button onClick={() => setShowEmojiPicker(o => !o)} disabled={!activeType}
+              title="Adicionar emoji"
+              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-card text-muted-foreground transition-colors hover:bg-muted disabled:opacity-40">
+              <Smile className="h-4 w-4" />
+            </button>
+            {showEmojiPicker && (
+              <div className="absolute bottom-11 left-0 z-50 w-[320px] max-w-[calc(100vw-2rem)] rounded-xl border border-border bg-popover p-2 shadow-lg">
+                <div className="grid max-h-56 grid-cols-8 overflow-y-auto">
+                  {MSG_EMOJIS.map(e => (
+                    <button key={e} onClick={() => inserirEmoji(e)}
+                      className="rounded-lg p-1 text-xl transition-colors hover:bg-muted">
+                      {e}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+          {isLeader() && activeType === 'channel' && (
+            <button onClick={() => { setShowEnqueteModal(true); setShowEmojiPicker(false) }} disabled={!activeType}
+              title="Criar enquete de votação"
+              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-[#0078d4]/30 bg-[#0078d4]/10 text-[#0078d4] transition-colors hover:bg-[#0078d4]/20 disabled:opacity-40">
+              <BarChart3 className="h-4 w-4" />
+            </button>
+          )}
           <textarea
             ref={textareaRef}
             value={texto}
-            onChange={e => setTexto(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (texto.trim() && activeType) enviar.mutate(texto.trim()) } }}
+            onChange={e => {
+              setTexto(e.target.value)
+              // Autosize imediato (garante que a quebra de linha cresce o campo)
+              const ta = textareaRef.current
+              if (ta) {
+                ta.style.height = 'auto'
+                ta.style.height = Math.min(ta.scrollHeight, 160) + 'px'
+              }
+            }}
+            onPaste={handlePaste}
+            onKeyDown={e => {
+              const isEnter = e.key === 'Enter' || e.code === 'Enter'
+              const comModificador = e.shiftKey || e.ctrlKey || e.metaKey || e.altKey
+              if (isEnter && !comModificador) {
+                e.preventDefault()
+                if ((texto.trim() || attachments.length > 0) && activeType) enviar.mutate(texto.trim())
+              }
+            }}
             placeholder={activeType ? 'Escreva uma mensagem… (Enter envia, Shift+Enter quebra linha)' : 'Selecione uma conversa'}
             disabled={!activeType}
             rows={1}
-            className="max-h-40 flex-1 resize-none rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+            className="max-h-40 flex-1 resize-none overflow-y-auto rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
           />
-          <button onClick={() => { if (texto.trim() && activeType) enviar.mutate(texto.trim()) }}
-            disabled={!activeType || !texto.trim() || enviar.isPending}
+          <button onClick={() => { if ((texto.trim() || attachments.length > 0) && activeType) enviar.mutate(texto.trim()) }}
+            disabled={!activeType || (!texto.trim() && attachments.length === 0) || enviar.isPending}
             className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-md shadow-primary/30 transition-colors hover:bg-primary/90 disabled:opacity-40">
             <Send className="h-4 w-4" />
           </button>
@@ -1052,7 +1293,7 @@ export default function ChatPage() {
             <div className="space-y-0.5">
               <div className="flex items-center gap-2 px-3 py-2">
                 <span className="text-xs text-muted-foreground">Reagir:</span>
-                <div className="flex gap-1">
+                <div className="grid grid-cols-6 gap-0.5">
                   {EMOJIS.map(e => (
                     <button key={e} onClick={() => { reagir.mutate({ id: menuMsg.id, reacao: e }); setMenuMsg(null) }}
                       className="rounded-full p-1 text-lg transition-transform hover:scale-125">{e}</button>
@@ -1071,6 +1312,12 @@ export default function ChatPage() {
                 className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-foreground hover:bg-muted">
                 <ClipboardList className="h-4 w-4 text-muted-foreground" /> Transformar em tarefa
               </button>
+              {isLeader() && activeType === 'channel' && (
+                <button onClick={() => { setShowEnqueteModal(true); setMenuMsg(null) }}
+                  className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-foreground hover:bg-muted">
+                  <BarChart3 className="h-4 w-4 text-muted-foreground" /> Criar enquete de votação
+                </button>
+              )}
               {IS_ADMIN.includes(me.role) && (
                 <button onClick={() => { if (confirm('Apagar mensagem?')) apagar.mutate(menuMsg.id); setMenuMsg(null) }}
                   className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-rose-600 hover:bg-rose-50">
@@ -1156,6 +1403,19 @@ export default function ChatPage() {
         </div>
       )}
 
+      {/* ── Modal de enquete ── */}
+      {showEnqueteModal && (
+        <EnqueteModal
+          canalId={activeId!}
+          onClose={() => setShowEnqueteModal(false)}
+          onSaved={() => {
+            setShowEnqueteModal(false)
+            justSent.current = true
+            invalidade()
+          }}
+        />
+      )}
+
       {/* ── Modal de tarefa ── */}
       {showTaskModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={() => setShowTaskModal(false)}>
@@ -1173,6 +1433,139 @@ export default function ChatPage() {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+/* ── Modal: Criar enquete ── */
+
+function EnqueteModal({ canalId, onClose, onSaved }: { canalId: number; onClose: () => void; onSaved: () => void }) {
+  const [pergunta, setPergunta] = useState('')
+  const [opcoes, setOpcoes] = useState<string[]>(['', ''])
+  const [prazo, setPrazo] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  const addOpcao = () => {
+    if (opcoes.length >= 10) return
+    setOpcoes(p => [...p, ''])
+  }
+
+  const removeOpcao = (idx: number) => {
+    if (opcoes.length <= 2) return
+    setOpcoes(p => p.filter((_, i) => i !== idx))
+  }
+
+  const handleSubmit = async () => {
+    setError('')
+    if (!pergunta.trim()) { setError('Pergunta obrigatória'); return }
+    const validas = opcoes.map(o => o.trim()).filter(Boolean)
+    if (validas.length < 2) { setError('Adicione pelo menos 2 opções'); return }
+    setSaving(true)
+    try {
+      const t = getToken()
+      const body: Record<string, unknown> = {
+        canal_id: canalId,
+        pergunta: pergunta.trim(),
+        opcoes: validas,
+        prazo: prazo ? new Date(prazo).toISOString() : null,
+      }
+      const r = await fetch('/api/chat/enquetes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + t },
+        body: JSON.stringify(body),
+      })
+      if (!r.ok) {
+        const d = await r.json().catch(() => null)
+        throw new Error(d?.detail || 'Erro ao criar enquete')
+      }
+      onSaved()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Erro ao criar enquete')
+    }
+    setSaving(false)
+  }
+
+  const inputCls = 'h-9 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring'
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <div className="w-full max-w-md rounded-xl border border-border bg-card shadow-lg" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between border-b border-border/60 px-6 py-4">
+          <h3 className="text-sm font-semibold text-foreground">Nova enquete de votação</h3>
+          <button onClick={onClose} className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-muted">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="max-h-[70vh] space-y-4 overflow-y-auto p-6">
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted-foreground">Pergunta *</label>
+            <input type="text" value={pergunta} onChange={e => setPergunta(e.target.value)}
+              placeholder="Ex: Qual dia para o happy hour?" className={inputCls} />
+          </div>
+
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted-foreground">
+              Opções (mín. 2, máx. 10) *
+            </label>
+            <div className="space-y-2">
+              {opcoes.map((op, idx) => (
+                <div key={idx} className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={op}
+                    onChange={e => setOpcoes(p => p.map((v, i) => (i === idx ? e.target.value : v)))}
+                    placeholder={`Opção ${idx + 1}`}
+                    className={inputCls}
+                  />
+                  {opcoes.length > 2 && (
+                    <button
+                      onClick={() => removeOpcao(idx)}
+                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-rose-50 hover:text-rose-600"
+                      title="Remover opção"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+            {opcoes.length < 10 && (
+              <button
+                onClick={addOpcao}
+                className="mt-2 inline-flex items-center gap-1.5 text-xs font-medium text-[#0078d4] transition-colors hover:text-[#0078d4]/80"
+              >
+                <Plus className="h-3.5 w-3.5" /> Adicionar opção
+              </button>
+            )}
+          </div>
+
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted-foreground">
+              Encerramento automático (opcional)
+            </label>
+            <input type="datetime-local" value={prazo} onChange={e => setPrazo(e.target.value)} className={inputCls} />
+            <p className="mt-1 text-[10px] text-muted-foreground">Deixe em branco para encerrar manualmente</p>
+          </div>
+
+          {error && <div className="text-xs text-rose-600">{error}</div>}
+        </div>
+
+        <div className="flex items-center justify-end gap-3 border-t border-border/60 px-6 py-4">
+          <button onClick={onClose} className="rounded-lg border border-border px-4 py-2 text-xs text-muted-foreground transition-colors hover:text-foreground">
+            Cancelar
+          </button>
+          <button
+            onClick={handleSubmit}
+            disabled={saving}
+            className="inline-flex items-center gap-2 rounded-lg bg-[#0078d4] px-4 py-2 text-xs font-medium text-white transition-colors hover:bg-[#0078d4]/90 disabled:opacity-50"
+          >
+            {saving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+            {saving ? 'Criando...' : 'Criar enquete'}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

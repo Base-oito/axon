@@ -1,10 +1,26 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { User, LogOut, KeyRound, Camera, X, Loader2, Bell, Moon, Sun } from 'lucide-react'
+import { User, LogOut, KeyRound, Camera, X, Loader2, Bell, Moon, Sun, Mail, FolderKanban, MessageSquare, Award, Megaphone, FileText, Users, Briefcase, CalendarClock, CheckSquare } from 'lucide-react'
 import { apiFetch, getToken } from '@/lib/api'
+import { storageRemove } from '@/lib/storage'
 import MacSwitch from '@/components/ui/MacSwitch'
 import { applyTheme, getInitialTheme } from '@/lib/theme'
+
+const NOTIF_TIPOS: { tipo: string; label: string; icon: any }[] = [
+  { tipo: 'certificado', label: 'Certificados digitais', icon: Award },
+  { tipo: 'chat', label: 'Chat (canais)', icon: MessageSquare },
+  { tipo: 'dm', label: 'Mensagens diretas (DM)', icon: Mail },
+  { tipo: 'processo', label: 'Processos', icon: FolderKanban },
+  { tipo: 'tarefa', label: 'Tarefas', icon: CheckSquare },
+  { tipo: 'comunicado', label: 'Comunicados', icon: Megaphone },
+  { tipo: 'reuniao', label: 'Reuniões', icon: CalendarClock },
+  { tipo: 'relatorio', label: 'Relatórios', icon: FileText },
+  { tipo: 'crm', label: 'CRM', icon: Briefcase },
+  { tipo: 'obrigacao', label: 'Obrigações', icon: CalendarClock },
+  { tipo: 'portfolio', label: 'Portal do cliente', icon: Users },
+  { tipo: 'vencimento', label: 'Vencimentos', icon: CalendarClock },
+]
 
 interface Me {
   id: number
@@ -55,7 +71,7 @@ export default function UserMenu() {
   }, [])
 
   const logout = () => {
-    localStorage.removeItem('nfse_token')
+    storageRemove('nfse_token')
     window.location.href = '/login'
   }
 
@@ -161,6 +177,26 @@ function PerfilModal({ me, onClose, onSaved }: { me?: Me; onClose: () => void; o
   const [notifPerm, setNotifPerm] = useState<NotificationPermission>(() =>
     typeof Notification !== 'undefined' ? Notification.permission : 'denied',
   )
+
+  // Preferências de notificação por tipo (quais tipos geram alerta de browser)
+  const [notifPrefs, setNotifPrefs] = useState<string[]>([])
+  useEffect(() => {
+    apiFetch<{ tipos: string[]; ativos: string[] }>('/api/notifications/prefs').catch(() => null).then(d => {
+      if (d) setNotifPrefs(d.ativos)
+    })
+  }, [])
+
+  const toggleNotifTipo = async (tipo: string, ativo: boolean) => {
+    const novo = ativo ? [...notifPrefs, tipo] : notifPrefs.filter(t => t !== tipo)
+    setNotifPrefs(novo)
+    const t = getToken()
+    try {
+      await fetch('/api/notifications/prefs', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + t },
+        body: JSON.stringify({ ativos: novo }),
+      })
+    } catch { /* falha silenciosa */ }
+  }
 
   const toggleDark = () => {
     setDark(d => {
@@ -377,6 +413,26 @@ function PerfilModal({ me, onClose, onSaved }: { me?: Me; onClose: () => void; o
                   </div>
                 </div>
                 <MacSwitch checked={dark} onChange={toggleDark} ariaLabel="Alternar tema claro/escuro" />
+              </div>
+
+              <div className="border-t border-border/60 pt-3">
+                <p className="mb-1 text-sm text-foreground">Tipos de notificação</p>
+                <p className="mb-2 text-[11px] text-muted-foreground">Escolha quais tipos geram alerta no navegador</p>
+                <div className="grid grid-cols-1 gap-1">
+                  {NOTIF_TIPOS.map(nt => {
+                    const Icon = nt.icon
+                    const ativo = notifPrefs.includes(nt.tipo)
+                    return (
+                      <div key={nt.tipo} className="flex items-center justify-between gap-3 rounded-md px-1 py-1 hover:bg-muted/40">
+                        <div className="flex min-w-0 items-center gap-2.5">
+                          <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
+                          <span className="truncate text-[13px] text-foreground">{nt.label}</span>
+                        </div>
+                        <MacSwitch checked={ativo} onChange={c => toggleNotifTipo(nt.tipo, c)} ariaLabel={`Notificação de ${nt.label}`} />
+                      </div>
+                    )
+                  })}
+                </div>
               </div>
             </div>
           </div>

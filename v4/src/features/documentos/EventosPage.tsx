@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { apiFetch } from '@/lib/api'
+import { apiFetch, openAuthedFile } from '@/lib/api'
 import { AlertTriangle } from 'lucide-react'
 import { SortableTh, sortItems, useSortable } from '@/components/ui/sortable'
 
@@ -78,8 +78,8 @@ export default function EventosPage() {
                   <td className="whitespace-nowrap px-3 py-2 text-xs text-muted-foreground">{fmtDate(e.issued_at)}</td>
                   <td className="px-3 py-2 text-xs text-muted-foreground">{e.movement_type || '-'}</td>
                   <td className="px-4 py-2 text-right">
-                    <a href={`/api/merchandise-documents/${e.id}/xml`} target="_blank" rel="noreferrer"
-                      className="rounded px-2 py-1 text-xs font-medium text-[#0078d4] transition-colors hover:bg-[#0078d4]/10">
+                    <a href={`/api/merchandise-documents/${e.id}/xml`} onClick={ev => { ev.preventDefault(); void openAuthedFile(`/api/merchandise-documents/${e.id}/xml`) }} target="_blank" rel="noreferrer"
+                      className="cursor-pointer rounded px-2 py-1 text-xs font-medium text-[#0078d4] transition-colors hover:bg-[#0078d4]/10">
                       XML
                     </a>
                   </td>

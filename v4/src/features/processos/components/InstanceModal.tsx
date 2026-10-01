@@ -21,6 +21,7 @@ export default function InstanceModal({ templates, clientes, onClose, onSaved }:
   const [prioridade, setPrioridade] = useState('Média')
   const [dataInicio, setDataInicio] = useState(new Date().toISOString().slice(0, 10))
   const [visibilidade, setVisibilidade] = useState('público')
+  const [mostrarCliente, setMostrarCliente] = useState(false)
   const [etapas, setEtapas] = useState<Etapa[]>([])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -67,6 +68,7 @@ export default function InstanceModal({ templates, clientes, onClose, onSaved }:
         prioridade,
         data_inicio: dataInicio,
         visibilidade,
+        mostrar_ao_cliente: mostrarCliente,
         etapas: etapasWithDue,
         etapa_atual: firstStep,
         status: 'Pendente',
@@ -132,6 +134,13 @@ export default function InstanceModal({ templates, clientes, onClose, onSaved }:
                 <option key={v} value={v}>{v.charAt(0).toUpperCase() + v.slice(1)}</option>
               ))}
             </select>
+          </div>
+          <div>
+            <label className="mb-1.5 flex cursor-pointer items-center gap-2 text-xs font-medium text-muted-foreground">
+              <input type="checkbox" checked={mostrarCliente} onChange={e => setMostrarCliente(e.target.checked)} className="h-3.5 w-3.5" />
+              Mostrar progresso para o cliente
+            </label>
+            <p className="text-[10px] text-muted-foreground/70">O cliente visualiza na área dele somente o percentual e a etapa atual (sem subtarefas).</p>
           </div>
           {etapas.length > 0 && (
             <div>

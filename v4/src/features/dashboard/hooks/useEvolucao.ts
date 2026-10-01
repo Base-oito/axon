@@ -19,6 +19,12 @@ export interface EvolucaoData {
   series: EvolucaoMes[]
   top_emitentes: Array<{ nome: string; qtd: number; valor: number }>
   por_uf: Array<{ uf: string; qtd: number }>
+  totais?: {
+    nfse_total: number
+    nfse_hoje: number
+    nfe_total: number
+    nfe_hoje: number
+  }
 }
 
 export interface DashboardFilters {

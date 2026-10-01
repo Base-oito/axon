@@ -1,7 +1,8 @@
 import type { LucideIcon } from 'lucide-react'
 import {
   FileText, MessageSquare, LayoutDashboard, Users, CalendarClock,
-  Workflow, MonitorSmartphone, Sparkles, Settings, ClipboardCheck,
+  Workflow, MonitorSmartphone, Sparkles, Settings, ClipboardCheck, Megaphone,
+  FolderKanban, Inbox, Target,
 } from 'lucide-react'
 
 export interface NavItem {
@@ -14,6 +15,24 @@ export interface NavSection {
   label: string
   icon: LucideIcon
   items: NavItem[]
+  /** Se presente, a seção só aparece para usuários com "role" no token. */
+  roles?: string[]
+}
+
+export function getTokenRole(): string {
+  try {
+    const raw = localStorage.getItem('nfse_token')
+    if (!raw) return ''
+    const obj = JSON.parse(raw)
+    const token = obj?.access_token || obj?.token || ''
+    if (!token) return ''
+    const p = JSON.parse(atob(token.split('.')[1]))
+    return p.role || ''
+  } catch { return '' }
+}
+
+export function mencionaComercial(deptName: string): boolean {
+  return (deptName || '').toLowerCase().replace('ç', 'c').replace('Ç', 'C').includes('omercial')
 }
 
 export const NAV_SECTIONS: NavSection[] = [
@@ -25,6 +44,7 @@ export const NAV_SECTIONS: NavSection[] = [
       { label: 'NFS-e (serviços)', icon: FileText, path: '/dashboard/nfse' },
       { label: 'Obrigações', icon: CalendarClock, path: '/dashboard/obrigacoes' },
       { label: 'Processos & Tarefas', icon: Workflow, path: '/dashboard/processos' },
+      { label: 'Resultados de Projetos', icon: FolderKanban, path: '/dashboard/resultados' },
     ],
   },
   {
@@ -39,6 +59,7 @@ export const NAV_SECTIONS: NavSection[] = [
     icon: MessageSquare,
     items: [
       { label: 'Conversas', icon: MessageSquare, path: '/chat' },
+      { label: 'Comunicados', icon: Megaphone, path: '/comunicados' },
       { label: 'IA de atendimento', icon: Sparkles, path: '/chat/ia' },
     ],
   },
@@ -47,7 +68,17 @@ export const NAV_SECTIONS: NavSection[] = [
     icon: Users,
     items: [
       { label: 'Clientes', icon: Users, path: '/clientes' },
+      { label: 'Documentos Recebidos', icon: Inbox, path: '/clientes/documentos-recebidos' },
+      { label: 'Portal de atendimento', icon: MessageSquare, path: '/portal-recepcao' },
     ],
+  },
+  {
+    label: 'CRM',
+    icon: Target,
+    items: [
+      { label: 'Funil de vendas', icon: Target, path: '/crm' },
+    ],
+    roles: ['administrador', 'super_admin'],
   },
   {
     label: 'Calendário',
@@ -69,6 +100,13 @@ export const NAV_SECTIONS: NavSection[] = [
     items: [
       { label: 'Andamentos', icon: Workflow, path: '/processos' },
       { label: 'Tarefas', icon: Workflow, path: '/tarefas' },
+    ],
+  },
+  {
+    label: 'Projetos',
+    icon: FolderKanban,
+    items: [
+      { label: 'Projetos', icon: FolderKanban, path: '/projetos' },
     ],
   },
   {

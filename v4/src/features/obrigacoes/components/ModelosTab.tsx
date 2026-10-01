@@ -4,7 +4,7 @@ import { Plus, Pencil, Trash2, Play, FileText, X, Loader2 } from 'lucide-react'
 import type { Modelo } from '../api'
 import { atualizarModelo, criarModelo, excluirModelo, gerarModelo, listModelos } from '../api'
 import { PRIO_BADGE, RECORRENCIA_OPTIONS, pad2 } from '../helpers'
-import { useClientes, useDepartamentos } from '@/features/processos/hooks/useShared'
+import { useClientesOperacionais, useDepartamentos } from '@/features/processos/hooks/useShared'
 import { SortableTh, sortItems, useSortable } from '@/components/ui/sortable'
 
 export default function ModelosTab() {
@@ -130,7 +130,7 @@ export default function ModelosTab() {
 }
 
 function ModeloModal({ modelo, onClose, onSaved }: { modelo: Modelo | null; onClose: () => void; onSaved: () => void }) {
-  const { data: clientes = [] } = useClientes()
+  const { data: clientes = [] } = useClientesOperacionais()
   const { data: departamentos = [] } = useDepartamentos()
   const [titulo, setTitulo] = useState(modelo?.titulo || '')
   const [recorrencia, setRecorrencia] = useState(modelo?.recorrencia || 'Mensal')

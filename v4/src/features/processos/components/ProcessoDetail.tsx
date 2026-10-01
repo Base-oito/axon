@@ -1,26 +1,33 @@
 import type { Processo } from '../types'
+import { FileCheck2, FileWarning } from 'lucide-react'
+import { openAuthedFile } from '@/lib/api'
 import {
   PRIORIDADE_MAP, SITUACAO_MAP, SITUACAO_OPTIONS, STATUS_MAP, STEP_TYPE_COLORS,
   addDays, countCompleted, fmtDateBR, fmtDateTimeBR, getCurrentStep, getDependencyNames,
-  hasIncompleteSubtasks, hasUnmetDependencies, safeEtapas,
+  hasIncompleteSubtasks, hasUnmetDependencies, podeConcluirEtapa, podeExcluirProcesso, safeEtapas,
 } from '../helpers'
 
 interface Props {
   processo: Processo
+  me: { id: number; role: string }
   saving: boolean
   editingSituacao: { id: number; situacao: string } | null
   onSetSituacao: (s: { id: number; situacao: string } | null) => void
   onSaveSituacao: () => void
   onChangeStatus: (status: string) => void
   onCompleteStep: (optionLabel?: string) => void
+  onAnexarEtapa: (stepId: string) => Promise<void>
   onToggleSubtask: (stepId: string, subtaskId: string) => void
   onDelete: () => void
   onOpenKanban: () => void
+  onClose: () => void
+  mostrarAoCliente: boolean
+  onToggleMostrarCliente: () => void
 }
 
 export default function ProcessoDetail({
-  processo, saving, editingSituacao, onSetSituacao, onSaveSituacao, onChangeStatus,
-  onCompleteStep, onToggleSubtask, onDelete, onOpenKanban,
+  processo, me, saving, editingSituacao, onSetSituacao, onSaveSituacao, onChangeStatus,
+  onCompleteStep, onAnexarEtapa, onToggleSubtask, onDelete, onOpenKanban, onClose, mostrarAoCliente, onToggleMostrarCliente,
 }: Props) {
   const etapas = safeEtapas(processo.etapas)
   const completed = countCompleted(etapas)
@@ -49,17 +56,28 @@ export default function ProcessoDetail({
           <span className="text-xs font-medium" style={{ color: PRIORIDADE_MAP[processo.prioridade] || '#535353' }}>
             {processo.prioridade}
           </span>
-          <button
-            onClick={onDelete}
-            className="rounded border border-red-400/30 px-3 py-1 text-xs tracking-wider text-red-400 transition-colors hover:bg-red-500/10"
-          >
-            Excluir
-          </button>
+          {podeExcluirProcesso(me, processo) && (
+            <button
+              onClick={onDelete}
+              className="rounded border border-red-400/30 px-3 py-1 text-xs tracking-wider text-red-400 transition-colors hover:bg-red-500/10"
+            >
+              Excluir
+            </button>
+          )}
           <button
             onClick={onOpenKanban}
             className="rounded border border-[#0078d4]/30 px-3 py-1 text-xs tracking-wider text-[#0078d4] transition-colors hover:bg-[#0078d4]/10"
           >
             Abrir Kanban
+          </button>
+          <button
+            onClick={onClose}
+            className="rounded border border-border px-3 py-1 text-xs tracking-wider text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          >
+            <svg className="mr-1 inline h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="m18 15-6-6-6 6" />
+            </svg>
+            Recolher
           </button>
         </div>
       </div>
@@ -76,12 +94,20 @@ export default function ProcessoDetail({
       </div>
 
       {/* Visibilidade */}
-      {processo.visibilidade && (
-        <div className="flex items-center gap-3">
-          <span className="text-xs tracking-wider text-muted-foreground">Visibilidade:</span>
-          <span className="text-xs capitalize text-foreground">{processo.visibilidade}</span>
-        </div>
-      )}
+      <div className="flex items-center gap-3">
+        <span className="text-xs tracking-wider text-muted-foreground">Visibilidade:</span>
+        <span className="text-xs capitalize text-foreground">{processo.visibilidade}</span>
+      </div>
+
+      {/* Mostrar progresso ao cliente */}
+      <div className="flex items-center gap-3">
+        <span className="text-xs tracking-wider text-muted-foreground">Portal do cliente:</span>
+        <label className="flex cursor-pointer items-center gap-2 text-xs">
+          <input type="checkbox" checked={mostrarAoCliente} onChange={onToggleMostrarCliente} disabled={saving} className="h-3.5 w-3.5" />
+          <span className="text-foreground">Mostrar progresso para o cliente</span>
+        </label>
+        <span className="text-[10px] text-muted-foreground/70">(percentual e tarefa atual, sem subtarefas)</span>
+      </div>
 
       {/* Situacao */}
       <div className="flex items-center gap-3">
@@ -137,6 +163,7 @@ export default function ProcessoDetail({
               const incompleteSubs = hasIncompleteSubtasks(etapa)
               const dueDate = etapa.dias && processo.data_inicio ? addDays(processo.data_inicio, etapa.dias) : etapa.dueDate || undefined
               const isAtrasado = !isDone && dueDate && new Date(dueDate + 'T00:00:00') < new Date()
+              const podeEtapa = podeConcluirEtapa(me, etapa, processo)
               let circleColor = '#535353'
               if (isDone) circleColor = '#10B981'
               else if (blocked) circleColor = '#F97316'
@@ -228,6 +255,38 @@ export default function ProcessoDetail({
                       <div className="mt-1.5 text-xs text-orange-400">(Bloqueado por: {getDependencyNames(etapa, etapas)})</div>
                     )}
 
+                    {etapa.exige_documento && (
+                      <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                        {etapa.anexo ? (
+                          <a
+                            href={etapa.anexo.url}
+                            onClick={ev => { ev.preventDefault(); void openAuthedFile(etapa.anexo!.url) }}
+                            target="_blank" rel="noreferrer"
+                            className="inline-flex cursor-pointer items-center gap-1 rounded bg-emerald-500/15 px-2 py-0.5 text-[11px] font-medium text-emerald-600 hover:bg-emerald-500/25"
+                          >
+                            <FileCheck2 className="h-3 w-3" /> {etapa.anexo.nome}
+                          </a>
+                        ) : isDone ? (
+                          <span className="inline-flex items-center gap-1 rounded bg-amber-500/15 px-2 py-0.5 text-[11px] font-medium text-amber-600">
+                            <FileWarning className="h-3 w-3" /> Documento não anexado
+                          </span>
+                        ) : (
+                          <>
+                            <span className="inline-flex items-center gap-1 text-[11px] text-amber-600">
+                              <FileWarning className="h-3 w-3" /> Esta etapa exige documento/relatório atualizado
+                            </span>
+                            <button
+                              onClick={() => onAnexarEtapa(etapa.id)}
+                              disabled={saving}
+                              className="rounded bg-[#0078d4]/10 px-2 py-0.5 text-[11px] font-medium text-[#0078d4] transition-colors hover:bg-[#0078d4]/20 disabled:opacity-50"
+                            >
+                              Anexar documento
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    )}
+
                     {etapa.subtasks && etapa.subtasks.length > 0 && (
                       <div className="ml-1 mt-2 space-y-1">
                         {etapa.subtasks.map(st => (
@@ -236,7 +295,8 @@ export default function ProcessoDetail({
                               type="checkbox"
                               checked={st.isCompleted}
                               onChange={() => onToggleSubtask(etapa.id, st.id)}
-                              className="h-3 w-3 rounded accent-[#0078d4]"
+                              disabled={!podeEtapa}
+                              className="h-3 w-3 rounded accent-[#0078d4] disabled:cursor-not-allowed"
                             />
                             <span style={{ textDecoration: st.isCompleted ? 'line-through' : 'none' }}>{st.title}</span>
                           </label>
@@ -250,6 +310,8 @@ export default function ProcessoDetail({
                           <span className="text-xs text-orange-400">(Etapa bloqueada)</span>
                         ) : incompleteSubs ? (
                           <span className="text-xs text-muted-foreground">Conclua todas as subtarefas primeiro!</span>
+                        ) : !podeEtapa ? (
+                          <span className="text-xs text-muted-foreground">Você não é o responsável por esta tarefa.</span>
                         ) : (
                           <button
                             onClick={() => onCompleteStep()}
@@ -268,6 +330,8 @@ export default function ProcessoDetail({
                           <span className="text-xs text-orange-400">(Etapa bloqueada)</span>
                         ) : incompleteSubs ? (
                           <span className="text-xs text-muted-foreground">Conclua todas as subtarefas primeiro!</span>
+                        ) : !podeEtapa ? (
+                          <span className="text-xs text-muted-foreground">Você não é o responsável por esta tarefa.</span>
                         ) : etapa.options && etapa.options.length > 0 ? (
                           <div className="flex flex-wrap items-center gap-2">
                             <span className="text-xs text-muted-foreground">{etapa.type === 'Gatilho' ? 'Disparar:' : 'Decisao:'}</span>

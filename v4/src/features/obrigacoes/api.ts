@@ -75,6 +75,28 @@ export interface AuditoriaEficiencia {
   colaboradores: EficienciaColaborador[]
 }
 
+export interface ReuniaoMes {
+  mes: string
+  horas: number
+}
+
+export interface ReuniaoColaborador {
+  id: number
+  nome: string
+  serie: ReuniaoMes[]
+  total_horas: number
+}
+
+export interface AuditoriaReunioes {
+  meses: string[]
+  colaboradores: ReuniaoColaborador[]
+  total_horas: number
+  internas: number
+  externas: number
+  internas_serie: number[]
+  externas_serie: number[]
+}
+
 export function listObrigacoes() {
   return apiFetch<Obrigacao[]>('/api/obrigacoes')
 }
@@ -93,6 +115,10 @@ export function listAuditoria() {
 
 export function listAuditoriaEficiencia() {
   return apiFetch<AuditoriaEficiencia>('/api/obrigacoes/auditoria/eficiencia')
+}
+
+export function listAuditoriaReunioes() {
+  return apiFetch<AuditoriaReunioes>('/api/obrigacoes/auditoria/reunioes')
 }
 
 export function listAuditoriaFiltros() {

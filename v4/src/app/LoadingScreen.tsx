@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { getInitialTheme } from '@/lib/theme'
 
 const LOADING_STEPS = [
   'Carregando módulos',
@@ -9,6 +10,7 @@ const LOADING_STEPS = [
 export default function LoadingScreen() {
   const [step, setStep] = useState(0)
   const [progress, setProgress] = useState(0)
+  const [dark] = useState(() => getInitialTheme() === 'dark')
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -21,7 +23,12 @@ export default function LoadingScreen() {
   return (
     <div className="loading-screen">
       <div className="loading-content">
-        <div className="loading-logo">Axon</div>
+        <img
+          src={dark ? '/axon-logo-dark.png' : '/axon-logo-light.png'}
+          alt="Axon"
+          className="h-10 w-auto"
+          draggable={false}
+        />
         <div className="loading-step">
           {LOADING_STEPS[step]}…
         </div>

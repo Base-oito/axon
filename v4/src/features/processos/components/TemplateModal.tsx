@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { apiFetch } from '@/lib/api'
 import type { Departamento } from '../hooks/useShared'
 import type { Etapa, Template } from '../types'
 import { saveTemplate, deleteTemplate, listTemplates } from '../api'
@@ -22,6 +23,12 @@ function MiniBadge({ text, color }: { text: string; color: string }) {
 const inputCls =
   'w-full rounded-lg border border-urban-smoke bg-background px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-[#0078d4]'
 
+const REC_LABEL: Record<string, string> = {
+  diaria: 'Diária', semanal: 'Semanal', mensal: 'Mensal',
+  trimestral: 'Trimestral', semestral: 'Semestral', anual: 'Anual',
+}
+const DIAS_SEMANA = ['Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado', 'Domingo']
+
 interface Props {
   template: Template | null
   departamentos: Departamento[]
@@ -35,6 +42,8 @@ export default function TemplateModal({ template, departamentos, onClose, onSave
   const [depto, setDepto] = useState(template?.departamento_id != null ? String(template.departamento_id) : '')
   const [recorrente, setRecorrente] = useState(!!template?.recorrente)
   const [recorrencia, setRecorrencia] = useState(template?.recorrencia_padrao || 'mensal')
+  const [diaMes, setDiaMes] = useState(template?.recorrencia_dia_mes ?? 1)
+  const [diaSemana, setDiaSemana] = useState(template?.recorrencia_dia_semana ?? 0)
   const [etapas, setEtapas] = useState<Etapa[]>(() =>
     template
       ? safeEtapas(template.etapas).map((e, i) => ({
@@ -46,11 +55,20 @@ export default function TemplateModal({ template, departamentos, onClose, onSave
           subtasks: e.subtasks || [],
           dias: e.dias || undefined,
           notificar_todos: e.notificar_todos || false,
+          exige_documento: e.exige_documento || false,
+          exige_aprovacao: e.exige_aprovacao || false,
+          aprovador_id: e.aprovador_id ?? '',
+          documentos_exigidos: e.documentos_exigidos || [],
         }))
       : []
   )
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const { data: usuarios = [] } = useQuery({
+    queryKey: ['processo-usuarios'],
+    queryFn: () => apiFetch<any[]>('/api/usuarios?limit=500'),
+    staleTime: 5 * 60_000,
+  })
 
   const addStep = (type: Etapa['type'] = 'Tarefa') => {
     setEtapas(prev => [
@@ -60,12 +78,17 @@ export default function TemplateModal({ template, departamentos, onClose, onSave
         title: '',
         type,
         assignee: '',
+        user_id: '',
         order: prev.length,
         options: type === 'Decisão' || type === 'Gatilho' ? [] : undefined,
         dependsOn: [],
         subtasks: [],
         dias: undefined,
         notificar_todos: false,
+        exige_documento: false,
+        exige_aprovacao: false,
+        aprovador_id: '',
+        documentos_exigidos: [],
       },
     ])
   }
@@ -128,6 +151,18 @@ export default function TemplateModal({ template, departamentos, onClose, onSave
     setEtapas(prev => prev.map((s, i) => (i !== stepIndex ? s : { ...s, subtasks: (s.subtasks || []).map(st => (st.id === subtaskId ? { ...st, title: value } : st)) })))
   }
 
+  const addDocExigido = (stepIndex: number) => {
+    setEtapas(prev => prev.map((s, i) => (i !== stepIndex ? s : { ...s, documentos_exigidos: [...(s.documentos_exigidos || []), { id: genSubtaskId(), nome: '' }] })))
+  }
+
+  const removeDocExigido = (stepIndex: number, docId: string) => {
+    setEtapas(prev => prev.map((s, i) => (i !== stepIndex ? s : { ...s, documentos_exigidos: (s.documentos_exigidos || []).filter(d => d.id !== docId) })))
+  }
+
+  const updateDocExigido = (stepIndex: number, docId: string, nome: string) => {
+    setEtapas(prev => prev.map((s, i) => (i !== stepIndex ? s : { ...s, documentos_exigidos: (s.documentos_exigidos || []).map(d => (d.id === docId ? { ...d, nome } : d)) })))
+  }
+
   const addBranchOption = (stepIndex: number) => {
     setEtapas(prev => prev.map((s, i) => (i !== stepIndex ? s : { ...s, options: [...(s.options || []), { label: '', nextStepId: '' }] })))
   }
@@ -161,6 +196,8 @@ export default function TemplateModal({ template, departamentos, onClose, onSave
         departamento_id: depto ? Number(depto) : null,
         recorrente,
         recorrencia_padrao: recorrencia,
+        recorrencia_dia_mes: recorrencia !== 'semanal' && recorrencia !== 'diaria' ? Math.max(1, Math.min(31, Number(diaMes) || 1)) : null,
+        recorrencia_dia_semana: recorrencia === 'semanal' ? Number(diaSemana) : null,
         etapas: etapas.map((e, i) => ({ ...e, order: i })),
       })
       onSaved()
@@ -248,13 +285,43 @@ export default function TemplateModal({ template, departamentos, onClose, onSave
                 <span className="text-xs text-muted-foreground">{recorrente ? 'Ativo' : 'Inativo'}</span>
               </div>
               {recorrente && (
-                <div className="mt-3">
-                  <label className="mb-1.5 block text-xs font-medium text-muted-foreground">Frequencia</label>
-                  <select value={recorrencia} onChange={e => setRecorrencia(e.target.value)} className={inputCls}>
-                    {RECORRENCIA_OPTIONS.map(o => (
-                      <option key={o} value={o}>{o.charAt(0).toUpperCase() + o.slice(1)}</option>
-                    ))}
-                  </select>
+                <div className="mt-3 space-y-3">
+                  <div>
+                    <label className="mb-1.5 block text-xs font-medium text-muted-foreground">Frequência</label>
+                    <select value={recorrencia} onChange={e => setRecorrencia(e.target.value)} className={inputCls}>
+                      {RECORRENCIA_OPTIONS.map(o => (
+                        <option key={o} value={o}>{REC_LABEL[o] || o}</option>
+                      ))}
+                    </select>
+                  </div>
+                  {recorrencia === 'semanal' && (
+                    <div>
+                      <label className="mb-1.5 block text-xs font-medium text-muted-foreground">Dia da semana</label>
+                      <select value={String(diaSemana)} onChange={e => setDiaSemana(Number(e.target.value))} className={inputCls}>
+                        {DIAS_SEMANA.map((label, i) => (
+                          <option key={i} value={i}>{label}</option>
+                        ))}
+                      </select>
+                      <p className="mt-1 text-[10px] text-muted-foreground">Ex.: toda segunda-feira</p>
+                    </div>
+                  )}
+                  {recorrencia !== 'semanal' && recorrencia !== 'diaria' && (
+                    <div>
+                      <label className="mb-1.5 block text-xs font-medium text-muted-foreground">Dia do mês</label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={31}
+                        value={diaMes}
+                        onChange={e => setDiaMes(Number(e.target.value) || 1)}
+                        className={inputCls}
+                      />
+                      <p className="mt-1 text-[10px] text-muted-foreground">Ex.: todo dia 01</p>
+                    </div>
+                  )}
+                  {recorrencia === 'diaria' && (
+                    <p className="text-[10px] text-muted-foreground">Todos os dias</p>
+                  )}
                 </div>
               )}
             </div>
@@ -343,6 +410,19 @@ export default function TemplateModal({ template, departamentos, onClose, onSave
                               ))}
                             </select>
                           </div>
+                          <div className="flex items-center gap-1.5">
+                            <label className="text-xs text-muted-foreground">Responsável:</label>
+                            <select
+                              value={etapa.user_id != null && etapa.user_id !== '' ? String(etapa.user_id) : ''}
+                              onChange={e => updateStepField(idx, 'user_id', e.target.value ? Number(e.target.value) : '')}
+                              className="max-w-[180px] rounded border border-border bg-background px-2 py-1 text-xs text-foreground focus:outline-none"
+                            >
+                              <option value="">Automático (responsável da empresa no depto)</option>
+                              {usuarios.map((u: any) => (
+                                <option key={u.id} value={u.id}>{u.display_name || u.username || `#${u.id}`}</option>
+                              ))}
+                            </select>
+                          </div>
                           <label className="flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
                             <input
                               type="checkbox"
@@ -352,6 +432,81 @@ export default function TemplateModal({ template, departamentos, onClose, onSave
                             />
                             Notificar todos ao concluir
                           </label>
+                        </div>
+                        <div className="mt-3 rounded-lg border border-[#0078d4]/20 bg-[#0078d4]/5 p-2.5">
+                          <label className="flex cursor-pointer items-start gap-2 text-xs">
+                            <input
+                              type="checkbox"
+                              checked={etapa.exige_documento || false}
+                              onChange={e => updateStepField(idx, 'exige_documento', e.target.checked)}
+                              className="mt-0.5 h-3 w-3 rounded accent-[#0078d4]"
+                            />
+                            <span>
+                              <span className="font-medium text-foreground">Exige Documento/Relatório atualizado</span>
+                              <span className="mt-0.5 block text-[11px] text-muted-foreground">
+                                Ao concluir esta etapa, o usuário deverá anexar um documento/relatório para fechar.
+                              </span>
+                            </span>
+                          </label>
+                        </div>
+
+                        {/* Checklist de documentos exigidos */}
+                        <div className="mt-3 rounded-lg border border-border bg-background p-2.5">
+                          <div className="mb-1.5 flex items-center gap-2">
+                            <label className="text-xs font-medium text-foreground">Documentos exigidos (checklist)</label>
+                            <button
+                              onClick={() => addDocExigido(idx)}
+                              className="rounded border border-[#0078d4]/30 px-2 py-0.5 text-xs text-[#0078d4] transition-colors hover:bg-[#0078d4]/10"
+                            >
+                              + Documento
+                            </button>
+                          </div>
+                          <p className="mb-2 text-[11px] text-muted-foreground">Cada documento da lista deverá ser anexado antes de concluir a etapa.</p>
+                          {(etapa.documentos_exigidos || []).map(doc => (
+                            <div key={doc.id} className="mb-1.5 flex items-center gap-2">
+                              <input
+                                type="text"
+                                value={doc.nome}
+                                onChange={e => updateDocExigido(idx, doc.id, e.target.value)}
+                                placeholder="Nome do documento (ex.: Contrato Social)"
+                                className="flex-1 rounded border border-border bg-background px-2 py-1 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none"
+                              />
+                              <button onClick={() => removeDocExigido(idx, doc.id)} className="shrink-0 text-xs text-red-400 hover:text-red-500">x</button>
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* Aprovação */}
+                        <div className="mt-3 rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-2.5">
+                          <label className="flex cursor-pointer items-start gap-2 text-xs">
+                            <input
+                              type="checkbox"
+                              checked={etapa.exige_aprovacao || false}
+                              onChange={e => updateStepField(idx, 'exige_aprovacao', e.target.checked)}
+                              className="mt-0.5 h-3 w-3 rounded accent-emerald-600"
+                            />
+                            <span>
+                              <span className="font-medium text-foreground">Exige Aprovação</span>
+                              <span className="mt-0.5 block text-[11px] text-muted-foreground">
+                                Ao concluir, a etapa vai para "Aguardando aprovação" e só fecha após o aceite do aprovador.
+                              </span>
+                            </span>
+                          </label>
+                          {etapa.exige_aprovacao && (
+                            <div className="mt-2 flex items-center gap-2">
+                              <label className="text-xs text-muted-foreground">Aprovador:</label>
+                              <select
+                                value={etapa.aprovador_id != null && etapa.aprovador_id !== '' ? String(etapa.aprovador_id) : ''}
+                                onChange={e => updateStepField(idx, 'aprovador_id', e.target.value ? Number(e.target.value) : '')}
+                                className="max-w-[220px] rounded border border-border bg-background px-2 py-1 text-xs text-foreground focus:outline-none"
+                              >
+                                <option value="">Responsável do processo (padrão)</option>
+                                {usuarios.map((u: any) => (
+                                  <option key={u.id} value={u.id}>{u.display_name || u.username || `#${u.id}`}</option>
+                                ))}
+                              </select>
+                            </div>
+                          )}
                         </div>
 
                         <div className="mt-3 border-t border-border/60 pt-3">

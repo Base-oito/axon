@@ -1,8 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
-import { LiveKitRoom, RoomAudioRenderer, useLocalParticipant, useTracks } from '@livekit/components-react'
+import { LiveKitRoom, RoomAudioRenderer, useLocalParticipant, useParticipants, useTracks } from '@livekit/components-react'
 import { Track } from 'livekit-client'
 import { getToken } from '@/lib/api'
-import { Mic, MicOff, PhoneOff } from 'lucide-react'
+import { Mic, MicOff, PhoneOff, Headphones } from 'lucide-react'
 
 interface VoiceState {
   canalId: number | null
@@ -119,6 +119,7 @@ export default function VoiceProvider({ children }: { children: ReactNode }) {
 
 function VoiceBar({ canalNome, onLeave }: { canalNome: string; onLeave: () => void }) {
   const local = useLocalParticipant()
+  const participants = useParticipants()
   const trackRefs = useTracks([Track.Source.Microphone])
   const micMuted = local.isMicrophoneEnabled === false
 
@@ -130,29 +131,55 @@ function VoiceBar({ canalNome, onLeave }: { canalNome: string; onLeave: () => vo
     }
   }
 
+  const quemFala = new Set(trackRefs.filter(t => t.participant.isSpeaking).map(t => t.participant.identity))
+
+  const initials = (nome: string) =>
+    nome.split(' ').map(p => p[0]).slice(0, 2).join('').toUpperCase()
+
   return (
-    <div className="fixed bottom-6 left-1/2 z-[60] flex -translate-x-1/2 items-center gap-3 rounded-full border border-border bg-card px-5 py-2.5 shadow-lg">
+    <div className="fixed bottom-4 left-1/2 z-[60] flex -translate-x-1/2 items-center gap-3 rounded-2xl border border-border bg-card px-5 py-2.5 shadow-lg">
       <span className="relative flex h-2.5 w-2.5">
         <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60" />
         <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500" />
       </span>
       <div className="flex items-center gap-2">
-        <Mic className="h-4 w-4 text-primary" />
+        <Headphones className="h-4 w-4 text-primary" />
         <span className="text-sm font-semibold text-foreground">{canalNome}</span>
       </div>
-      <div className="mx-1 hidden h-4 w-px bg-border sm:block" />
-      <div className="hidden items-center gap-2 sm:flex">
-        {trackRefs.length === 0 ? (
-          <span className="text-[11px] text-muted-foreground">Só você está aqui…</span>
+      <div className="mx-1 hidden h-6 w-px bg-border sm:block" />
+      {/* Participantes na voz */}
+      <div className="flex items-center gap-2">
+        {participants.length === 0 ? (
+          <span className="text-[11px] text-muted-foreground">Conectando…</span>
         ) : (
-          trackRefs.map(tr => (
-            <span key={tr.participant.identity} className="flex items-center gap-1 text-[11px] text-muted-foreground">
-              <span className={`h-1.5 w-1.5 rounded-full ${tr.participant.isSpeaking ? 'bg-emerald-500' : 'bg-muted-foreground/40'}`} />
-              <span className="max-w-[80px] truncate">{tr.participant.name || tr.participant.identity}</span>
+          <div className="flex items-center">
+            {participants.map(p => {
+              const nome = p.name || p.identity
+              const eu = p.identity === local.localParticipant.identity
+              return (
+                <div
+                  key={p.identity}
+                  className="group relative -ml-1.5 first:ml-0"
+                  title={nome}
+                >
+                  <div className={`flex h-8 w-8 items-center justify-center rounded-full border-2 text-[10px] font-bold ${
+                    eu ? 'border-[#0078d4] bg-[#0078d4]/15 text-[#0078d4]' : 'border-border bg-muted text-foreground'
+                  } ${quemFala.has(p.identity) ? 'ring-2 ring-emerald-500' : ''}`}>
+                    {initials(nome)}
+                  </div>
+                  <span className="pointer-events-none absolute -bottom-5 left-1/2 z-10 -translate-x-1/2 whitespace-nowrap rounded bg-popover px-1.5 py-0.5 text-[10px] text-foreground opacity-0 shadow transition-opacity group-hover:opacity-100">
+                    {eu ? 'Você' : nome}{quemFala.has(p.identity) ? ' · falando' : ''}
+                  </span>
+                </div>
+              )
+            })}
+            <span className="ml-2 text-[11px] text-muted-foreground">
+              {participants.length} {participants.length === 1 ? 'pessoa' : 'pessoas'}
             </span>
-          ))
+          </div>
         )}
       </div>
+      <div className="mx-1 hidden h-6 w-px bg-border sm:block" />
       <button
         onClick={toggleMic}
         title={micMuted ? 'Ativar microfone' : 'Silenciar microfone'}

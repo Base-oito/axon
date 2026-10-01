@@ -1,26 +1,74 @@
 import { useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { ChevronDown, ChevronRight } from 'lucide-react'
+import { useQuery } from '@tanstack/react-query'
+import { ChevronDown, ChevronRight, Pin, PinOff, X } from 'lucide-react'
 import { NAV_SECTIONS } from '@/lib/navigation'
+import { apiFetch } from '@/lib/api'
+import { getInitialTheme } from '@/lib/theme'
+import { useIsMobile } from '@/hooks/useMediaQuery'
 
-export default function AppSidebar() {
+function useIsDark() {
+  const [dark, setDark] = useState(() => getInitialTheme() === 'dark')
+  useEffect(() => {
+    const obs = new MutationObserver(() => setDark(document.documentElement.classList.contains('dark')))
+    obs.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
+    return () => obs.disconnect()
+  }, [])
+  return dark
+}
+
+function getInitialPinned(): boolean {
+  try {
+    return localStorage.getItem('axon_sidebar_pinned') === 'true'
+  } catch {
+    return false
+  }
+}
+
+export default function AppSidebar({ mobileOpen = false, onClose }: { mobileOpen?: boolean; onClose?: () => void }) {
   const navigate = useNavigate()
   const location = useLocation()
+  const isDark = useIsDark()
+  const isMobile = useIsMobile()
+  const [pinned, setPinned] = useState(getInitialPinned)
   const [expanded, setExpanded] = useState(false)
   const [hoverSection, setHoverSection] = useState<string | null>(null)
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({})
   const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // Em mobile o menu fica sempre expandido (desenho do drawer)
+  const forceExpanded = isMobile ? true : expanded
+
+  useEffect(() => {
+    if (pinned) {
+      setExpanded(true)
+    }
+    try {
+      localStorage.setItem('axon_sidebar_pinned', String(pinned))
+    } catch {
+      /* ignore */
+    }
+  }, [pinned])
+
   const handleMouseEnter = () => {
     if (hoverTimer.current) clearTimeout(hoverTimer.current)
-    setExpanded(true)
+    if (!pinned) setExpanded(true)
   }
 
   const handleMouseLeave = () => {
+    if (pinned) return
     hoverTimer.current = setTimeout(() => {
       setExpanded(false)
       setHoverSection(null)
     }, 150)
+  }
+
+  const togglePinned = () => {
+    setPinned(p => !p)
+    if (pinned) {
+      setExpanded(false)
+      setHoverSection(null)
+    }
   }
 
   const isItemActive = (path: string) =>
@@ -28,9 +76,25 @@ export default function AppSidebar() {
 
   const sectionActive = (paths: string[]) => paths.some(p => isItemActive(p))
 
+  // Visibilidade por cargo: CRM só para Admin/Super OU líder do departamento Comercial
+  const { data: meInfo } = useQuery({
+    queryKey: ['sidebar-me'],
+    queryFn: () => apiFetch<any>('/api/me').catch(() => null),
+    staleTime: 5 * 60_000,
+  })
+  const podeVerCRM = (() => {
+    const role = meInfo?.role || ''
+    if (['administrador', 'super_admin'].includes(role)) return true
+    if (role === 'lider' && meInfo?.departamento_nome) {
+      return String(meInfo.departamento_nome).toLowerCase().replace('ç', 'c').includes('omercial')
+    }
+    return false
+  })()
+  const secoesVisiveis = NAV_SECTIONS.filter(s => (s.roles?.length ? podeVerCRM : true))
+
   // Abre automaticamente a seção da rota atual (sem impedir o usuário de recolher)
   useEffect(() => {
-    const activeSection = NAV_SECTIONS.find(s => sectionActive(s.items.map(i => i.path)))
+    const activeSection = secoesVisiveis.find(s => sectionActive(s.items.map(i => i.path)))
     if (activeSection) {
       setOpenSections(prev => ({ ...prev, [activeSection.label]: true }))
     }
@@ -40,6 +104,11 @@ export default function AppSidebar() {
     setOpenSections(prev => ({ ...prev, [label]: !prev[label] }))
   }
 
+  const go = (path: string) => {
+    navigate(path)
+    if (isMobile && onClose) onClose()
+  }
+
   const renderSectionButton = (section: (typeof NAV_SECTIONS)[number], isActive: boolean, isHovered: boolean) => {
     const Icon = section.icon
     const isOpen = !!openSections[section.label]
@@ -47,10 +116,10 @@ export default function AppSidebar() {
       <button
         onClick={() => {
           // Expandido: toggle o submenu; recolhido: navega pro primeiro item
-          if (expanded && section.items.length > 1) {
+          if (forceExpanded && section.items.length > 1) {
             toggleSection(section.label)
           } else {
-            navigate(section.items[0].path)
+            go(section.items[0].path)
           }
         }}
         className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors transition-apple ${
@@ -62,7 +131,7 @@ export default function AppSidebar() {
         }`}
       >
         <Icon className="h-5 w-5 shrink-0" />
-        {expanded && (
+        {forceExpanded && (
           <>
             <span className="min-w-0 flex-1 truncate text-left">{section.label}</span>
             {section.items.length > 1 && (
@@ -75,25 +144,60 @@ export default function AppSidebar() {
   }
 
   return (
-    <aside
-      onMouseEnter={handleMouseEnter}
-      onMouseLeave={handleMouseLeave}
-      className={`divider-header relative z-30 flex h-full flex-col bg-sidebar transition-[width] duration-200 ease-out ${
-        expanded ? 'w-60' : 'w-16'
-      }`}
-    >
+    <>
+      {/* Overlay — fecha o drawer em mobile ao tocar fora */}
+      {isMobile && mobileOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-black/50"
+          onClick={() => onClose && onClose()}
+        />
+      )}
+      <aside
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={handleMouseLeave}
+        className={`divider-header flex h-full flex-col bg-sidebar ${
+          isMobile
+            ? `fixed inset-y-0 left-0 z-50 w-64 ${
+                mobileOpen ? 'flex translate-x-0 shadow-2xl' : 'hidden'
+              }`
+            : `relative z-30 transition-[width] duration-200 ease-out ${forceExpanded ? 'w-60' : 'w-16'}`
+        }`}
+      >
+        {/* Botão fechar no mobile */}
+        {isMobile && (
+          <div className="absolute right-2 top-4 z-10">
+            <button
+              onClick={() => onClose && onClose()}
+              className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+              aria-label="Fechar menu"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+        )}
       {/* Logo */}
       <div className="divider-soft flex h-16 items-center gap-2 px-4">
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary text-sm font-bold text-primary-foreground">
-          A
-        </div>
-        {expanded && <span className="text-lg font-bold text-foreground">Axon</span>}
+        {expanded ? (
+          <img
+            src={isDark ? '/axon-logo-dark.png' : '/axon-logo-light.png'}
+            alt="Axon"
+            className="h-7 w-auto"
+            draggable={false}
+          />
+        ) : (
+          <img
+            src={isDark ? '/axon-x-white.png' : '/axon-x-blue.png'}
+            alt="Axon"
+            className="h-7 w-auto"
+            draggable={false}
+          />
+        )}
       </div>
 
       {/* Navegação */}
       <nav className="flex-1 overflow-y-auto overflow-x-visible py-3">
         <ul className="space-y-1 px-2">
-          {NAV_SECTIONS.map(section => {
+          {secoesVisiveis.map(section => {
             const isHovered = hoverSection === section.label
             const isActive = sectionActive(section.items.map(i => i.path))
             const isOpen = !!openSections[section.label]
@@ -107,7 +211,7 @@ export default function AppSidebar() {
                 {renderSectionButton(section, isActive, isHovered)}
 
                 {/* Submenu flutuante — quando recolhido e com hover */}
-                {!expanded && isHovered && (
+                {!forceExpanded && isHovered && (
                   <div className="absolute left-full top-0 z-50 ml-2 w-56 rounded-lg border border-border bg-popover p-1.5 shadow-lg">
                     <p className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                       {section.label}
@@ -115,7 +219,7 @@ export default function AppSidebar() {
                     {section.items.map(item => (
                       <button
                         key={item.path}
-                        onClick={() => navigate(item.path)}
+                        onClick={() => go(item.path)}
                         className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors transition-apple ${
                           isItemActive(item.path)
                             ? 'bg-primary text-primary-foreground shadow-md shadow-primary/30'
@@ -136,12 +240,12 @@ export default function AppSidebar() {
                 )}
 
                 {/* Submenu inline — quando expandido e a seção está aberta */}
-                {expanded && isOpen && (
+                {forceExpanded && isOpen && (
                   <ul className="mt-0.5 space-y-0.5 pl-4">
                     {section.items.map(item => (
                       <li key={item.path}>
                         <button
-                          onClick={() => navigate(item.path)}
+                          onClick={() => go(item.path)}
                           className={`flex w-full items-center gap-2.5 rounded-lg py-1.5 pl-3 pr-3 text-sm transition-colors transition-apple ${
                             isItemActive(item.path)
                               ? 'bg-primary text-primary-foreground shadow-md shadow-primary/30'
@@ -160,6 +264,27 @@ export default function AppSidebar() {
           })}
         </ul>
       </nav>
-    </aside>
+
+      {/* Rodapé — fixar menu */}
+      <div className="divider-soft shrink-0 border-t border-border/60 p-2">
+        <button
+          onClick={togglePinned}
+          title={pinned ? 'Menu fixado — clique para voltar ao automático' : 'Fixar menu aberto'}
+          className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors transition-apple ${
+            pinned
+              ? 'bg-primary/10 text-primary'
+              : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+          }`}
+        >
+          {pinned ? <Pin className="h-5 w-5 shrink-0" /> : <PinOff className="h-5 w-5 shrink-0" />}
+          {forceExpanded && (
+            <span className="min-w-0 flex-1 truncate text-left">
+              {pinned ? 'Menu fixado' : 'Fixar menu'}
+            </span>
+          )}
+        </button>
+      </div>
+      </aside>
+    </>
   )
 }

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { apiFetch, getToken } from '@/lib/api'
+import { apiFetch, getToken, openAuthedFile } from '@/lib/api'
 import { FileSpreadsheet, FileText as FileTextIcon, FileArchive } from 'lucide-react'
 
 interface Doc {
@@ -61,6 +61,7 @@ function fmtCnpj(v?: string) {
 export default function DocumentsPage() {
   const [tipo, setTipo] = useState<'todas' | 'nfse' | 'mercadorias'>('todas')
   const [cliente, setCliente] = useState('')
+  const [movimento, setMovimento] = useState('')
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
   const [q, setQ] = useState('')
@@ -85,6 +86,7 @@ export default function DocumentsPage() {
   if (to) params.set('issued_to', to)
   if (q) params.set('search', q)
   if (showEvents && tipo !== 'nfse') params.set('show_events', 'true')
+  if (movimento && tipo === 'nfse') params.set('movement_type', movimento)
 
   const needsNfe = tipo === 'mercadorias' || tipo === 'todas'
   const needsNfse = tipo === 'nfse' || tipo === 'todas'
@@ -114,6 +116,10 @@ export default function DocumentsPage() {
   const buildReportBody = () => {
     const body: any = { doc_type: tipo === 'todas' ? 'both' : tipo }
     if (cliente) body.cliente_id = cliente
+    if (movimento) {
+      body.movement = movimento
+      if (tipo === 'todas') body.doc_type = 'nfse'
+    }
     if (from) body.issued_from = from
     if (to) body.issued_to = to
     if (showEvents) body.show_events = true
@@ -219,6 +225,17 @@ export default function DocumentsPage() {
             ))}
           </select>
         </div>
+        {tipo === 'nfse' && (
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted-foreground">Movimento</label>
+            <select value={movimento} onChange={e => { setMovimento(e.target.value); setPage(0) }}
+              className="h-9 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-ring">
+              <option value="">Prestadas e tomadas</option>
+              <option value="prestados">Prestadas</option>
+              <option value="tomados">Tomadas</option>
+            </select>
+          </div>
+        )}
         <div>
           <label className="mb-1 block text-xs font-medium text-muted-foreground">De</label>
           <input type="date" value={from} onChange={e => { setFrom(e.target.value); setPage(0) }}
@@ -292,8 +309,9 @@ export default function DocumentsPage() {
                   <td className="py-2 pr-3 whitespace-nowrap text-right text-xs font-medium">{fmtMoney(d.total_value)}</td>
                   <td className="py-2 pr-4 text-center">
                     <a href={`/api/${d.tipo === 'NFS-e' ? 'nfse-documents' : 'merchandise-documents'}/${d.id}/xml`}
+                      onClick={e => { e.preventDefault(); void openAuthedFile(`/api/${d.tipo === 'NFS-e' ? 'nfse-documents' : 'merchandise-documents'}/${d.id}/xml`) }}
                       target="_blank" rel="noreferrer"
-                      className="rounded px-2 py-1 text-xs font-medium text-[#0078d4] transition-colors hover:bg-[#0078d4]/10">
+                      className="cursor-pointer rounded px-2 py-1 text-xs font-medium text-[#0078d4] transition-colors hover:bg-[#0078d4]/10">
                       XML
                     </a>
                   </td>

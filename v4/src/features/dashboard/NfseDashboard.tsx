@@ -16,6 +16,7 @@ export default function NfseDashboard() {
   const totalPrestados = data.series.reduce((s, m) => s + m.nfse_prestados, 0)
   const valTomados = data.series.reduce((s, m) => s + m.nfse_valor_tomados, 0)
   const valPrestados = data.series.reduce((s, m) => s + m.nfse_valor_prestados, 0)
+  const tot = data.totais || { nfse_total: 0, nfse_hoje: 0 }
 
   const donutData = [
     { name: 'Prestados', value: totalPrestados },
@@ -24,11 +25,18 @@ export default function NfseDashboard() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight text-foreground">NFS-e — Notas de Serviço</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Captura automática via ADN Nacional · {data.months} meses
-        </p>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight text-foreground">NFS-e — Notas de Serviço</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Captura automática via ADN Nacional · {data.months} meses
+          </p>
+        </div>
+        <div className="rounded-lg border border-border/60 bg-muted/30 px-4 py-2 text-right">
+          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Total registrado</p>
+          <p className="text-xl font-bold text-foreground">{tot.nfse_total.toLocaleString('pt-BR')}</p>
+          <p className="text-xs text-muted-foreground">{tot.nfse_hoje} baixada{tot.nfse_hoje === 1 ? '' : 's'} hoje</p>
+        </div>
       </div>
 
       <FilterBar filters={filters} onChange={setFilters} />
@@ -66,12 +74,12 @@ export default function NfseDashboard() {
           />
         </ChartCard>
 
-        <ChartCard title="Composição" subtitle="Distribuição acumulada (12 meses)">
+        <ChartCard title="Composição" subtitle={`Distribuição acumulada (12 meses) · ${tot.nfse_total.toLocaleString('pt-BR')} notas no total`}>
           <div className="grid grid-cols-[1fr_auto] items-center gap-4">
             <SoftDonut
               data={donutData}
               centerValue={String(totalPrestados + totalTomados)}
-              centerLabel="notas"
+              centerLabel={`de ${tot.nfse_total.toLocaleString('pt-BR')} notas`}
               colors={['#0078d4', '#3b9ef5']}
             />
             <div className="space-y-3 text-xs">

@@ -1,10 +1,13 @@
 import { useQuery } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
-import { Hourglass, CheckCircle2, AlertTriangle, TrendingUp, FileText, Download } from 'lucide-react'
-import { listAuditoria, listAuditoriaEficiencia, listAuditoriaFiltros } from '../api'
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts'
+import { Hourglass, CheckCircle2, AlertTriangle, TrendingUp, FileText, Download, Clock } from 'lucide-react'
+import { listAuditoria, listAuditoriaEficiencia, listAuditoriaReunioes, listAuditoriaFiltros } from '../api'
 import type { AuditoriaItem } from '../api'
 import { fmtDateBR, fmtMoney } from '../helpers'
 import { SortableTh, sortItems, useSortable } from '@/components/ui/sortable'
+import { fmtHorasHM } from '@/lib/utils'
+import { openAuthedFile } from '@/lib/api'
 
 type StatusFiltro = '' | 'abertas' | 'concluidas'
 
@@ -31,6 +34,7 @@ export default function AuditoriaTab() {
 
   const { data: itens = [] } = useQuery({ queryKey: ['obrigacoes-auditoria'], queryFn: listAuditoria, staleTime: 60_000 })
   const { data: efic } = useQuery({ queryKey: ['obrigacoes-auditoria-eficiencia'], queryFn: listAuditoriaEficiencia, staleTime: 60_000 })
+  const { data: reunioesData } = useQuery({ queryKey: ['obrigacoes-auditoria-reunioes'], queryFn: listAuditoriaReunioes, staleTime: 60_000 })
   const { data: filtros } = useQuery({ queryKey: ['obrigacoes-auditoria-filtros'], queryFn: listAuditoriaFiltros, staleTime: 10 * 60_000 })
 
   const s = useSortable('titulo')
@@ -163,6 +167,109 @@ export default function AuditoriaTab() {
         </div>
       )}
 
+      {/* Tempo em reuniões por colaborador */}
+      {reunioesData && reunioesData.colaboradores.length > 0 && (
+        <div className="card-soft overflow-hidden rounded-lg bg-card">
+          <div className="flex items-center justify-between border-b border-border/60 px-4 py-3">
+            <div>
+              <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                <Clock className="h-4 w-4 text-[#0078d4]" />
+                Tempo em reuniões por colaborador
+              </h3>
+              <p className="text-xs text-muted-foreground">
+                Horas em reuniões nos últimos 6 meses — <span className="font-medium text-foreground">{fmtHorasHM(reunioesData.total_horas)} no total</span>
+              </p>
+            </div>
+            <span className="rounded bg-muted px-2 py-1 text-[10px] font-medium text-muted-foreground">
+              {reunioesData.colaboradores.length} colaboradores
+            </span>
+          </div>
+          {/* Pizza: interna vs externa */}
+          <div className="grid gap-4 border-b border-border/60 p-4 sm:grid-cols-2">
+            <div className="relative h-44">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={[
+                      { name: 'Internas', value: reunioesData.internas || 0 },
+                      { name: 'Externas', value: reunioesData.externas || 0 },
+                    ]}
+                    dataKey="value"
+                    nameKey="name"
+                    innerRadius="60%"
+                    outerRadius="88%"
+                    paddingAngle={3}
+                    strokeWidth={0}
+                  >
+                    <Cell fill="#34c759" />
+                    <Cell fill="#0078d4" />
+                  </Pie>
+                  <Tooltip
+                    formatter={(v) => fmtHorasHM(Number(v))}
+                    contentStyle={{ background: 'var(--popover)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+              <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+                <span className="text-xl font-bold text-foreground">{fmtHorasHM(reunioesData.total_horas)}</span>
+                <span className="text-[10px] text-muted-foreground">total</span>
+              </div>
+            </div>
+            <div className="flex flex-col justify-center gap-3">
+              <div className="flex items-center gap-2.5">
+                <span className="h-3 w-3 rounded-full bg-[#34c759]" />
+                <span className="flex-1 text-sm text-foreground">Internas</span>
+                <span className="text-sm font-semibold text-foreground">{fmtHorasHM(reunioesData.internas || 0)}</span>
+              </div>
+              <div className="flex items-center gap-2.5">
+                <span className="h-3 w-3 rounded-full bg-[#0078d4]" />
+                <span className="flex-1 text-sm text-foreground">Externas</span>
+                <span className="text-sm font-semibold text-foreground">{fmtHorasHM(reunioesData.externas || 0)}</span>
+              </div>
+              <div className="mt-1 rounded-lg bg-muted/40 p-2.5 text-[11px] leading-relaxed text-muted-foreground">
+                {reunioesData.internas + reunioesData.externas > 0
+                  ? `${Math.round((reunioesData.internas / (reunioesData.internas + reunioesData.externas)) * 100)}% do tempo foi em reuniões internas`
+                  : 'Sem dados de divisão interna/externa'}
+              </div>
+            </div>
+          </div>
+          <div className="p-4">
+            {reunioesData.colaboradores.map(c => {
+              const maxH = Math.max(...reunioesData.colaboradores.map(x => x.total_horas), 1)
+              const pct = (c.total_horas / maxH) * 100
+              return (
+                <div key={c.id} className="mb-3">
+                  <div className="mb-1 flex items-center justify-between">
+                    <span className="text-xs font-medium text-foreground">{c.nome}</span>
+                    <span className="text-xs font-semibold text-[#0078d4]">{fmtHorasHM(c.total_horas)}</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <div className="relative h-4 flex-1 overflow-hidden rounded bg-muted">
+                      <div
+                        className="h-full rounded bg-gradient-to-r from-[#0078d4] to-[#3b9ef5] transition-all"
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
+                    <div className="flex shrink-0 gap-0.5">
+                      {c.serie.map((s, i) => (
+                        <span
+                          key={i}
+                          title={`${reunioesData.meses[i]}: ${fmtHorasHM(s.horas)}`}
+                          className={`h-4 w-1 rounded-sm ${s.horas > 0 ? 'bg-[#0078d4]/50' : 'bg-muted-foreground/15'}`}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )
+            })}
+            <p className="mt-2 text-[10px] text-muted-foreground">
+              As barrinhas à direita mostram a distribuição por mês ({reunioesData.meses.join(', ')})
+            </p>
+          </div>
+        </div>
+      )}
+
       <div className="text-sm text-muted-foreground">
         <span className="font-semibold text-foreground">{filtered.length}</span> obrigação(ões)
         {status === 'abertas' ? ' em aberto' : status === 'concluidas' ? ' concluída(s)' : ''}
@@ -243,7 +350,7 @@ export default function AuditoriaTab() {
                         {i.titulo}
                         {i.documento_requerido && <FileText className="h-3.5 w-3.5 text-amber-500" aria-label="Documento requerido" />}
                         {concluida && i.arquivo_path && (
-                          <a href={`/api/obrigacoes/${i.id}/arquivo`} target="_blank" rel="noreferrer" className="text-[#0078d4] hover:underline" title="Anexo">
+                          <a href={`/api/obrigacoes/${i.id}/arquivo`} onClick={e => { e.preventDefault(); void openAuthedFile(`/api/obrigacoes/${i.id}/arquivo`) }} target="_blank" rel="noreferrer" className="cursor-pointer text-[#0078d4] hover:underline" title="Anexo">
                             <Download className="h-3.5 w-3.5" />
                           </a>
                         )}
