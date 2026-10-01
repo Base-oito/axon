@@ -17,3 +17,11 @@ Thumbs.db
 # Builds temporários (dist é versionado para deploy direto)
 /tmp/
 v4/tsconfig.tsbuildinfo
+
+# Artefatos de build Android/Capacitor
+v4/android/**/build/
+v4/android/.gradle/
+*.apk
+
+# Download duplicado
+axon-design-system/AXON*.png
